@@ -61,6 +61,8 @@ Five ideas (cordis-paradigm, clean-room implementation):
 | M5 | roblox domain plugin | roblox verify suite vs live Studio |
 | M6 | demo-fs domain + plugin cookbook + npm publish | third-party plugin guide |
 
+Roblox domain design: see [domain-roblox.md](./domain-roblox.md).
+
 ## M3 progress notes (2026-08-22)
 
 Gateway and the first extension adapter exist; the *live chat* E2E is still

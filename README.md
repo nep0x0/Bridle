@@ -38,6 +38,7 @@ installable plugin, not the product.
 | `@bridle/tools` | Tool registry + guarded pipeline (`tools/pre-execute` waterfall deny/mutate, post-execute audit) |
 | `@bridle/agent` | The agent loop **as a plugin**: turn/step driver over the session log |
 | `@bridle/llm` | Canonical adapter seam + OpenAI-compatible provider (DeepSeek, Groq, Ollama, ...) |
+| `@bridle/security` | Permission-class gate (`read/write/execute`, allow/ask/deny) over `tools/pre-execute` + durable audit trail |
 | `@bridle/headless` | One-call wiring (`createBridle`) + the `bridle` CLI |
 | `extension/` | Browser extension (MV3): web-chat render adapters over the gateway protocol — M3, WIP, see [extension/README.md](./extension/README.md) |
 
