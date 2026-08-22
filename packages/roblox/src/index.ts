@@ -17,11 +17,13 @@ import { FakeStudioTransport } from "./fake-studio.ts";
 import { readTools } from "./tools/read.ts";
 import { writeTools } from "./tools/write.ts";
 import { makeVerifyKinds } from "./verify/index.ts";
+import { McpStdioTransport } from "./mcp-stdio.ts";
 import { DocsMirror, parseLlmsIndex, curate, type MirrorPage } from "./knowledge/docs.ts";
 import { loadRobloxConfig, type RobloxConfig } from "./config.ts";
 
 export {
   FakeStudioTransport,
+  McpStdioTransport,
   loadRobloxConfig,
   DocsMirror,
   parseLlmsIndex,
@@ -73,11 +75,14 @@ async function robloxSetup(ctx: PluginContext, opts: RobloxOptions): Promise<voi
   const transport: StudioTransport =
     opts.transport ??
     (config.studioMcpPath
-      ? // R4 will construct McpStdioTransport here; for now fail honestly.
-        (() => {
-          throw new Error(
-            "live MCP transport arrives in R4 — pass {transport: new FakeStudioTransport()} or wait for R4",
-          );
+      ? await (async () => {
+          // R4: live MCP stdio transport. On Windows run the exe directly;
+          // elsewhere through the configured wine command.
+          const isWindows = process.platform === "win32";
+          const command = isWindows ? config.studioMcpPath : config.wineCmd || "wine";
+          const args = isWindows ? [] : [config.studioMcpPath];
+          log(`roblox: launching live StudioMCP: ${command} ${args.join(" ")}`);
+          return await McpStdioTransport.connect({ command, args, log });
         })()
       : new FakeStudioTransport());
   if (transport.kind === "fake" && !opts.transport) {

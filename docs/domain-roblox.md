@@ -144,3 +144,11 @@ Dua lapis, sesuai pola repo:
 | R2 | docs mirror + knowledge injection | injection budget test |
 | R3 | verify kinds + auto_run loop | auto_run FakeStudio end-to-end |
 | R4 | live Studio suite + benchmark mini | angka benchmark tercatat |
+
+**Status eksekusi (2026-08-22):** R0–R3 ✅ (opencode), R4 kode ✅ —
+`McpStdioTransport` (JSON-RPC stdio, handshake, retry `tools/list` untuk
+late-attach backend, pemetaan argumen terpusat di satu tabel) diuji mekanis
+terhadap fake MCP server child-process; suite live bersifat opt-in
+(`BRIDLE_LIVE_STUDIO=1`) dan skip jujur tanpa Studio. **Belum tuntas:**
+satu lari nyata vs Roblox Studio (butuh Windows/macOS) untuk memvalidasi
+bentuk argumen di tabel pemetaan + angka benchmark mini.

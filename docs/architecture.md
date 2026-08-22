@@ -58,7 +58,7 @@ Five ideas (cordis-paradigm, clean-room implementation):
 | M2 ✅ | llm seam + OpenAI-compatible adapter + headless bundle & CLI | E2E over real HTTP: tool-call round trip vs local mock |
 | M3 ✅ | webchat gateway ws + browser extension + DeepSeek adapter | live chat E2E ✅ (2026-08-22: real turn via chat.deepseek.com — tool-call round trip, 2 steps, no API key; Gemini adapter deferred) |
 | M4 ✅ | security gate/audit + workflow pack (plans/auto_run/scaffold) | 8 workflow tests: lifecycle, cycles→blocked, gate integration, decision persistence |
-| M5 ◐ | roblox domain plugin (R0–R3: FakeStudio, read/write tools, docs mirror + injection, verify kinds; live MCP transport = R4) | roblox verify suite vs live Studio |
+| M5 ◐ | roblox domain plugin (R0–R3 done; **R4 code done**: McpStdioTransport + fake-MCP mechanics suite + opt-in live suite `BRIDLE_LIVE_STUDIO=1`) | final gate still pending: one real run vs live Roblox Studio (Windows/macOS) |
 | M6 | demo-fs domain + plugin cookbook + npm publish | third-party plugin guide |
 
 Roblox domain design: see [domain-roblox.md](./domain-roblox.md).
