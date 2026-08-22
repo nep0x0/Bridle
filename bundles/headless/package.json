@@ -1,0 +1,30 @@
+{
+  "name": "@bridle/headless",
+  "version": "0.1.0",
+  "description": "bridle headless bundle: kernel+session+tools+agent+llm wired, plus the bridle CLI",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "bridle": "./bin/bridle.mjs" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@bridle/kernel": "workspace:*",
+    "@bridle/session": "workspace:*",
+    "@bridle/tools": "workspace:*",
+    "@bridle/agent": "workspace:*",
+    "@bridle/llm": "workspace:*",
+    "@bridle/gateway-ws": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "ws": "^8.18.0"
+  }
+}
