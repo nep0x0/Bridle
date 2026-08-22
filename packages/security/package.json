@@ -1,0 +1,28 @@
+{
+  "name": "@bridle/security",
+  "version": "0.1.0",
+  "description": "bridle security: permission-class gate over the tools pipeline + durable audit trail",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./node": { "types": "./dist/node/console-approver.d.ts", "import": "./dist/node/console-approver.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@bridle/kernel": "workspace:*",
+    "@bridle/session": "workspace:*",
+    "@bridle/tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -16,6 +16,11 @@ export interface ToolDef<A = Record<string, unknown>> {
   description: string;
   /** JSON-schema-ish param description for prompt assembly (M2+). */
   params?: Record<string, string>;
+  /** Declared permission class. The security gate (@bridle/security, when
+   *  mounted) reads this; undeclared tools fall back to its default class.
+   *  Convention: read = observes, write = mutates state, execute = runs
+   *  code / arbitrary instructions. */
+  permission?: "read" | "write" | "execute";
   execute(args: A): Promise<ToolOutput> | ToolOutput;
 }
 
@@ -73,6 +78,17 @@ export class ToolsService {
 
   has(name: string): boolean {
     return this.#tools.has(name);
+  }
+
+  /** Full definition lookup (incl. the declared permission class) for the
+   *  security gate. Defensive copy — callers cannot mutate the registry. */
+  describe(name: string):
+    | { name: string; description: string; params?: Record<string, string>; permission?: "read" | "write" | "execute" }
+    | undefined {
+    const t = this.#tools.get(name);
+    if (!t) return undefined;
+    const { name: n, description, params, permission } = t as ToolDef;
+    return { name: n, description, params, permission };
   }
 
   async execute(name: string, args: Record<string, unknown>): Promise<ToolOutput> {

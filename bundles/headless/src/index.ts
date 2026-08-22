@@ -17,6 +17,7 @@ import {
   type LlmAdapter,
   type OpenAiCompatConfig,
 } from "@bridle/llm";
+import { securityPlugin, type SecurityOptions } from "@bridle/security";
 
 export interface BridleOptions {
   /** API-model configuration (OpenAI-compatible endpoint). */
@@ -27,6 +28,8 @@ export interface BridleOptions {
    *  web-chat adapter). */
   adapter?: LlmAdapter;
   maxSteps?: number;
+  /** Mount the permission gate (M4). Absent ⇒ no gate, current behaviour. */
+  security?: SecurityOptions;
 }
 
 export interface Bridle {
@@ -36,18 +39,21 @@ export interface Bridle {
   run(input: string): Promise<{ steps: number; text: string; rejected?: string }>;
 }
 
-/** Built-in demo tools — deliberately sandboxed and boring. */
+/** Built-in demo tools — deliberately sandboxed and boring, and now
+ *  permission-classified for the security gate. */
 function builtinTools(): Array<ToolDef> {
   return [
     {
       name: "echo",
       description: "Echo the given text back.",
       params: { text: "string" },
+      permission: "read",
       execute: (a: { text: string }) => ({ ok: true, text: String(a.text) }),
     },
     {
       name: "now",
       description: "Current UTC time in ISO format.",
+      permission: "read",
       execute: () => ({ ok: true, text: new Date().toISOString() }),
     },
     {
@@ -55,6 +61,8 @@ function builtinTools(): Array<ToolDef> {
       description:
         "Evaluate a simple arithmetic expression of digits and + - * / ( ) . Only those characters are allowed.",
       params: { expr: "string" },
+      // Runs arbitrary (charset-gated) code ⇒ execute class.
+      permission: "execute",
       execute: (a: { expr: string }) => {
         const expr = String(a.expr ?? "");
         if (!/^[0-9+\-*/(). ]+$/.test(expr)) {
@@ -74,6 +82,7 @@ export async function createBridle(opts: BridleOptions): Promise<Bridle> {
 
   await ctx.mount({ name: "session", setup: (s) => sessionPlugin(s) });
   await ctx.mount({ name: "tools", setup: (s) => toolsPlugin(s) });
+  if (opts.security) await ctx.mount(securityPlugin(opts.security));
 
   const adapter: LlmAdapter = opts.adapter ?? openAiCompatAdapter(opts.llm);
   ctx.provide("llm", adapter);

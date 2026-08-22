@@ -21,10 +21,24 @@ import {
   WebchatGateway,
   EXTENSION_DEFAULT_PORT,
 } from "@bridle/gateway-ws";
+import { listApprover } from "@bridle/security";
+import { blockingConsoleApprover } from "@bridle/security/node";
 
-const prompt =
-  process.argv.slice(2).join(" ").trim() ||
-  "What is 12*9? Use the math tool.";
+// ── CLI flags ────────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+const allowIdx = [];
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--allow") allowIdx.push(i);
+}
+const allowedTools = allowIdx.map((i) => argv[i + 1]).filter(Boolean).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean);
+for (const i of [...allowIdx].reverse()) argv.splice(i, 2);
+if (allowedTools.length) allowedTools.push("echo", "now"); // builtins stay usable
+
+const prompt = argv.join(" ").trim() || "What is 12*9? Use the math tool.";
+
+// Security policy (M4): reads flow; writes/executes need approval —
+// via the --allow list when given, otherwise interactively in this terminal.
+const approver = allowedTools.length ? listApprover(allowedTools) : blockingConsoleApprover();
 
 // Construct first, listen later — so the capabilities frame pushed when the
 // adapter connects already lists every registered tool.
@@ -35,7 +49,14 @@ const gw = new WebchatGateway(
 );
 
 console.log(`[bridle] starting harness; gateway will listen on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
-const bridle = await createBridle({ adapter: gw.webchatAdapter(), maxSteps: 6 });
+const bridle = await createBridle({
+  adapter: gw.webchatAdapter(),
+  maxSteps: 6,
+  security: {
+    modes: { read: "allow", write: "ask", execute: "ask" },
+    approver,
+  },
+});
 await gw.listen();
 console.log("[bridle] tools:", bridle.tools.list().map((t) => t.name).join(", "));
 console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");

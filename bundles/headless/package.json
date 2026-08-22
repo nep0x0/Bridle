@@ -19,7 +19,8 @@
     "@bridle/tools": "workspace:*",
     "@bridle/agent": "workspace:*",
     "@bridle/llm": "workspace:*",
-    "@bridle/gateway-ws": "workspace:*"
+    "@bridle/gateway-ws": "workspace:*",
+    "@bridle/security": "workspace:*"
   },
   "devDependencies": {
     "@types/ws": "^8.5.0",
