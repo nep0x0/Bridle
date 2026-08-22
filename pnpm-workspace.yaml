@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "domains/*"
+  - "bundles/*"
+
+allowBuilds:
+  esbuild: true
