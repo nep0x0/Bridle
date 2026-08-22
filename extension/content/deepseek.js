@@ -198,14 +198,32 @@
     return { parent: box, before };
   }
 
-  /** One anchoring pass: create if missing, re-home if re-rendered away.
-   *  Visual contract (copied from ZS's zs-bar-inside): TRANSPARENT, no own
-   *  radius — it blends as a top strip of the rounded composer with only a
-   *  subtle bottom hairline; padding matches the input's text inset. */
+  /** Cached last-known status. The anchoring pass repaints from THIS every
+   *  tick, because React re-renders can wipe our node at any moment — and a
+   *  freshly re-created bar must never sit empty waiting for an event that
+   *  may never fire again (the exact bug this replaces). */
+  let lastStatus = { gateway: false, tools: null, adapters: 0 };
+
+  function paintStatus(bar, s) {
+    const dot = (on) =>
+      `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
+    const tools =
+      typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
+    bar.innerHTML =
+      `<span style="letter-spacing:.4px">BRIDLE</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
+      `<span>${tools}</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(s.adapters > 0)} chat tab</span>`;
+    bar.dataset.sig = `${s.gateway}|${s.tools}|${s.adapters}`;
+  }
+
+  /** One anchoring pass: create if missing/wiped, re-home if re-rendered
+   *  away, then ALWAYS repaint from the cache (cheap; signature-guarded). */
   function placeStatus() {
     const mount = barMount();
     if (!mount) return;
     let bar = document.getElementById(BAR_ID);
+    const sig = `${lastStatus.gateway}|${lastStatus.tools}|${lastStatus.adapters}`;
     if (!bar || !bar.isConnected) {
       bar = document.createElement("div");
       bar.id = BAR_ID;
@@ -221,29 +239,19 @@
         "pointer-events:none", "white-space:nowrap",
       ].join(";");
       mount.parent.insertBefore(bar, mount.before ?? null);
-      return; // content painted by the next renderStatus tick
-    }
-    if (bar.parentElement !== mount.parent) {
+    } else if (bar.parentElement !== mount.parent) {
       try {
         mount.parent.insertBefore(bar, mount.before ?? null);
       } catch { /* transient SPA churn */ }
     }
+    if (bar.dataset.sig !== sig || !bar.childNodes.length) {
+      paintStatus(bar, lastStatus);
+    }
   }
 
   function renderStatus(s) {
-    lastStatusRendered = s;
+    lastStatus = s;
     placeStatus();
-    const bar = document.getElementById(BAR_ID);
-    if (!bar) return;
-    const dot = (on) =>
-      `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
-    const tools =
-      typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
-    bar.innerHTML =
-      `<span style="letter-spacing:.4px">BRIDLE</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
-      `<span>${tools}</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(s.adapters > 0)} chat tab</span>`;
   }
 
   // ── composer mode: pick Expert/"Pakar" so the brain actually thinks ────
