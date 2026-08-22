@@ -159,7 +159,18 @@ export async function agentSetup(
             messages: claimed.messages,
             tools: tools.list(),
           });
-          const res = await llm.complete(req);
+          let res;
+          try {
+            res = await llm.complete(req);
+          } catch (err) {
+            // A failed render is a durable fact too — log it before failing.
+            sessions.append("turn/error", {
+              turnId,
+              step: steps,
+              reason: `llm render failed: ${String((err as Error)?.message ?? err)}`,
+            });
+            throw err;
+          }
           lastText = res.text;
           sessions.append("assistant/message", {
             text: res.text,

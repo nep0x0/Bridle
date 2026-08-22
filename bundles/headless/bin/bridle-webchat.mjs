@@ -64,6 +64,7 @@ if (gw.readyAdapter?.url) {
 console.log("[bridle] adapter connected — running turn through the browser …\n");
 
 process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
+// Register early so Ctrl+C works even while waiting for the adapter.
 
 try {
   const res = await bridle.run(prompt);
@@ -81,6 +82,8 @@ try {
   }
 } catch (err) {
   console.error("[bridle] turn failed honestly:", err?.message ?? err);
-} finally {
-  await gw.close();
 }
+
+// Keep the gateway up so the tab's adapter stays attached for another try
+// (a closed gateway sends the service worker into suspend/retry cycling).
+console.log("\n[bridle] gateway stays up — Ctrl+C to exit.");

@@ -172,6 +172,7 @@
       }
     }
     if (!prev) throw new Error("reply stayed empty until the deadline");
+    console.info(`[bridle] reply captured (${prev.length} chars): ${prev.slice(0, 120).replace(/\n/g, " ")}`);
 
     const parsed = Wire.parseToolCalls(prev);
     return {
