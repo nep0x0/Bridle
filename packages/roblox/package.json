@@ -1,0 +1,26 @@
+{
+  "name": "@bridle/roblox",
+  "version": "0.1.0",
+  "description": "bridle roblox domain plugin: Studio tools, docs mirror, verify kinds, playtest — just one plugin",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@bridle/kernel": "workspace:*",
+    "@bridle/session": "workspace:*",
+    "@bridle/tools": "workspace:*",
+    "@bridle/workflow": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

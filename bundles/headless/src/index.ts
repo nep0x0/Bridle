@@ -18,6 +18,10 @@ import {
   type OpenAiCompatConfig,
 } from "@bridle/llm";
 import { securityPlugin, type SecurityOptions } from "@bridle/security";
+import {
+  workflowPlugin,
+  type WorkflowOptions,
+} from "@bridle/workflow";
 
 export interface BridleOptions {
   /** API-model configuration (OpenAI-compatible endpoint). */
@@ -28,8 +32,12 @@ export interface BridleOptions {
    *  web-chat adapter). */
   adapter?: LlmAdapter;
   maxSteps?: number;
-  /** Mount the permission gate (M4). Absent ⇒ no gate, current behaviour. */
+  /** Permission gate configuration (M4). Absent ⇒ no gate. */
   security?: SecurityOptions;
+  /** Workflow pack (plans / auto_run / scaffolds). Default: on with
+   *  defaults; pass false to disable, or options to tune verify kinds,
+   *  cycle limits and the rollback hook. */
+  workflow?: false | WorkflowOptions;
 }
 
 export interface Bridle {
@@ -83,6 +91,9 @@ export async function createBridle(opts: BridleOptions): Promise<Bridle> {
   await ctx.mount({ name: "session", setup: (s) => sessionPlugin(s) });
   await ctx.mount({ name: "tools", setup: (s) => toolsPlugin(s) });
   if (opts.security) await ctx.mount(securityPlugin(opts.security));
+  if (opts.workflow !== false) {
+    await ctx.mount(workflowPlugin(opts.workflow ?? {}));
+  }
 
   const adapter: LlmAdapter = opts.adapter ?? openAiCompatAdapter(opts.llm);
   ctx.provide("llm", adapter);

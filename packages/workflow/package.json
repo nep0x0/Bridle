@@ -1,15 +1,11 @@
 {
-  "name": "@bridle/headless",
+  "name": "@bridle/workflow",
   "version": "0.1.0",
-  "description": "bridle headless bundle: kernel+session+tools+agent+llm wired, plus the bridle CLI",
+  "description": "bridle workflow pack: plan manifest, verify-driven auto_run, scaffolds — enforcement over hope",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "bridle": "./bin/bridle.mjs",
-    "bridle-webchat": "./bin/bridle-webchat.mjs"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -22,19 +18,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@bridle/agent": "workspace:*",
-    "@bridle/gateway-ws": "workspace:*",
     "@bridle/kernel": "workspace:*",
-    "@bridle/llm": "workspace:*",
-    "@bridle/security": "workspace:*",
     "@bridle/session": "workspace:*",
-    "@bridle/tools": "workspace:*",
-    "@bridle/workflow": "workspace:*"
+    "@bridle/tools": "workspace:*"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.0",
+    "@types/node": "^22.20.1",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "ws": "^8.18.0"
+    "vitest": "^3.0.0"
   }
 }
