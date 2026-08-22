@@ -154,6 +154,13 @@
 
   const BAR_ID = "bridle-status-bar";
 
+  // LATCHED mount (ZS does the same for its Vision selection): once a
+  // conversation starts, DeepSeek REMOVES the mode radiogroup from the DOM,
+  // so the "no tabs" constraint vanishes and a fresh climb would land in a
+  // tiny button row — squashing the bar. Latch the first good box and reuse
+  // it while it stays connected and still contains the editor.
+  let latchedParent = null; // Element | null
+
   /** Lowest textarea ancestor holding the send button but no mode tabs. */
   function barMount() {
     let ta;
@@ -163,6 +170,17 @@
       return null;
     }
     if (!ta) return null;
+
+    if (
+      latchedParent &&
+      latchedParent.isConnected &&
+      latchedParent.contains(ta)
+    ) {
+      let before = latchedParent.firstElementChild;
+      if (before && before.id === BAR_ID) before = before.nextElementSibling;
+      return { parent: latchedParent, before };
+    }
+
     const send = document.querySelector(SEL.sendBtn);
     const group = document.querySelector('[role="radiogroup"]');
     let box = ta.parentElement;
@@ -173,12 +191,17 @@
       box = box.parentElement;
     }
     if (!box || box === document.body) box = ta.parentElement;
+    if (!box) return null;
+    latchedParent = box; // latch
     let before = box.firstElementChild;
     if (before && before.id === BAR_ID) before = before.nextElementSibling;
     return { parent: box, before };
   }
 
-  /** One anchoring pass: create if missing, re-home if re-rendered away. */
+  /** One anchoring pass: create if missing, re-home if re-rendered away.
+   *  Visual contract (copied from ZS's zs-bar-inside): TRANSPARENT, no own
+   *  radius — it blends as a top strip of the rounded composer with only a
+   *  subtle bottom hairline; padding matches the input's text inset. */
   function placeStatus() {
     const mount = barMount();
     if (!mount) return;
@@ -187,16 +210,18 @@
       bar = document.createElement("div");
       bar.id = BAR_ID;
       bar.style.cssText = [
-        "width:100%", "margin:0 0 8px 0",
+        "width:100%", "box-sizing:border-box",
+        "flex-shrink:0", "min-height:26px",
+        "margin:0 0 6px 0",
         "display:flex", "gap:10px", "align-items:center",
-        "padding:6px 12px", "border-radius:12px",
-        "background:#0f1420e6", "color:#d7e3ff",
-        "font:600 12px/1.4 system-ui,sans-serif",
-        "border:1px solid #2a3550",
-        "pointer-events:none", "white-space:nowrap", "overflow:hidden",
+        "padding:4px 14px 8px",
+        "background:transparent", "border:none",
+        "border-bottom:1px solid #ffffff14", "border-radius:0",
+        "color:#d7e3ff", "font:600 12px/1.4 system-ui,sans-serif",
+        "pointer-events:none", "white-space:nowrap",
       ].join(";");
       mount.parent.insertBefore(bar, mount.before ?? null);
-      if (!lastStatusRendered) return; // content arrives with next status msg
+      return; // content painted by the next renderStatus tick
     }
     if (bar.parentElement !== mount.parent) {
       try {
@@ -204,8 +229,6 @@
       } catch { /* transient SPA churn */ }
     }
   }
-
-  let lastStatusRendered = { gateway: false, tools: null, adapters: 0 };
 
   function renderStatus(s) {
     lastStatusRendered = s;
