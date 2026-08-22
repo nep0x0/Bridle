@@ -19,15 +19,22 @@ export interface RobloxConfig {
   studioMcpPath: string;
   /** Command used to run the exe (wine on Linux/macOS; undefined = run directly). */
   wineCmd?: string;
+  /** WINEPREFIX for the exe — vinegar keeps Studio's prefix at
+   *  data/vinegar/prefixes/studio (auto-detected when it exists). */
+  winePrefix?: string;
   /** Transport type. M5: "stdio" only. */
   transport: "stdio";
   /** Where each value came from — for honest logging. */
-  source: { studioMcpPath: string; wineCmd: string };
+  source: { studioMcpPath: string; wineCmd: string; winePrefix: string };
 }
 
 const KNOWN_VINEGAR_PATHS = [
   `${homedir()}/.var/app/org.vinegarhq.Vinegar/data/vinegar/versions/latest-version/StudioMCP.exe`,
   `${homedir()}/.var/app/org.vinegarhq.Vinegar/data/vinegar/versions/StudioMCP.exe`,
+];
+
+const KNOWN_VINEGAR_PREFIXES = [
+  `${homedir()}/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes/studio`,
 ];
 
 export interface ConfigSourceInfo {
@@ -39,11 +46,12 @@ export interface ConfigSourceInfo {
 function readConfigFile(path: string): {
   studioMcpPath?: string;
   wineCmd?: string;
+  winePrefix?: string;
 } {
   try {
     if (!existsSync(path)) return {};
     const raw = JSON.parse(readFileSync(path, "utf-8")) as {
-      roblox?: { studioMcpPath?: string; wineCmd?: string };
+      roblox?: { studioMcpPath?: string; wineCmd?: string; winePrefix?: string };
     };
     return raw.roblox ?? {};
   } catch {
@@ -59,16 +67,19 @@ export function loadRobloxConfig(
   const source: RobloxConfig["source"] = {
     studioMcpPath: "none",
     wineCmd: "none",
+    winePrefix: "none",
   };
 
   // 1) environment
   let studioMcpPath = env.BRIDLE_STUDIO_MCP || undefined;
   let wineCmd = env.BRIDLE_WINE || undefined;
+  let winePrefix = env.BRIDLE_WINEPREFIX || undefined;
   if (studioMcpPath) source.studioMcpPath = "env";
   if (wineCmd) source.wineCmd = "env";
+  if (winePrefix) source.winePrefix = "env";
 
   // 2) config files
-  if (!studioMcpPath || !wineCmd) {
+  if (!studioMcpPath || !wineCmd || !winePrefix) {
     const candidates = [
       join(process.cwd(), "bridle.config.json"),
       join(homedir(), ".config", "bridle", "config.json"),
@@ -83,7 +94,11 @@ export function loadRobloxConfig(
         wineCmd = cfg.wineCmd;
         source.wineCmd = `file:${file}`;
       }
-      if (studioMcpPath && wineCmd) break;
+      if (!winePrefix && cfg.winePrefix) {
+        winePrefix = cfg.winePrefix;
+        source.winePrefix = `file:${file}`;
+      }
+      if (studioMcpPath && wineCmd && winePrefix) break;
     }
   }
 
@@ -93,6 +108,13 @@ export function loadRobloxConfig(
     if (hit) {
       studioMcpPath = hit;
       source.studioMcpPath = "detected";
+    }
+  }
+  if (!winePrefix) {
+    const hit = KNOWN_VINEGAR_PREFIXES.find((p) => existsSync(p));
+    if (hit) {
+      winePrefix = hit;
+      source.winePrefix = "detected";
     }
   }
   if (!wineCmd) {
@@ -110,10 +132,12 @@ export function loadRobloxConfig(
     log(`roblox config: studioMcpPath from ${source.studioMcpPath}`);
   }
   log(`roblox config: wineCmd from ${source.wineCmd}`);
+  if (winePrefix) log(`roblox config: winePrefix from ${source.winePrefix}`);
 
   return {
     studioMcpPath: studioMcpPath ?? "",
     wineCmd,
+    ...(winePrefix ? { winePrefix } : {}),
     transport: "stdio",
     source,
   };

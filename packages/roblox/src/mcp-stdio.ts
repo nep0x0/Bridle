@@ -30,6 +30,8 @@ export interface McpStdioOptions {
   command: string;
   /** Arguments after the program (usually [studioMcpPath]). */
   args?: string[];
+  /** Extra environment (e.g. WINEPREFIX for a vinegar prefix). */
+  env?: Record<string, string>;
   requestTimeoutMs?: number; // default 30_000
   toolsReadyTimeoutMs?: number; // default 15_000 (backend attach window)
   log?: (m: string) => void;
@@ -60,6 +62,11 @@ export class McpStdioTransport implements StudioTransport {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #toolNames: string[] = [];
+  /** Every StudioMCP tool requires studio_id ("use list_roblox_studios").
+   *  Discovered at connect; empty string is the honest single-instance
+   *  fallback when the discovery tool itself is not advertised. */
+  #studioId = "";
+  #captureSeq = 0;
   #stderrTail: string[] = [];
   #opts: Required<Pick<McpStdioOptions, "requestTimeoutMs" | "toolsReadyTimeoutMs">> & {
     log: (m: string) => void;
@@ -74,6 +81,7 @@ export class McpStdioTransport implements StudioTransport {
     };
     this.#proc = spawn(opts.command, opts.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
     });
     this.#proc.stdout!.setEncoding("utf8");
     this.#proc.stdout!.on("data", (chunk: string) => this.#onData(chunk));
@@ -106,6 +114,7 @@ export class McpStdioTransport implements StudioTransport {
       });
       t.#notify("notifications/initialized");
       await t.#waitToolsReady();
+      await t.#discoverStudioId();
       return t;
     } catch (err) {
       t.close();
@@ -206,10 +215,28 @@ export class McpStdioTransport implements StudioTransport {
     );
   }
 
+  async #discoverStudioId(): Promise<void> {
+    if (!this.#toolNames.includes("list_roblox_studios")) return; // keep ""
+    try {
+      const res = await this.#callTool("list_roblox_studios", {});
+      const arr = this.#parseMaybeJsonArray<{ id?: string; studio_id?: string }>(res.text);
+      const first = arr[0];
+      if (first) {
+        this.#studioId = String(first.id ?? first.studio_id ?? "");
+        this.#opts.log(`StudioMCP: studio_id=${this.#studioId || "(empty)"}`);
+      }
+    } catch (e) {
+      this.#opts.log(`StudioMCP: list_roblox_studios failed (${String((e as Error).message).slice(0, 80)}) — using empty studio_id`);
+    }
+  }
+
   async #callTool(tool: string, args: Record<string, unknown>): Promise<StudioResult> {
+    // studio_id is REQUIRED on every StudioMCP tool — injected centrally so
+    // no mapping can forget it.
+    const full = { studio_id: this.#studioId, ...args };
     let msg: JsonRpcResponse;
     try {
-      msg = await this.#request("tools/call", { name: tool, arguments: args });
+      msg = await this.#request("tools/call", { name: tool, arguments: full });
     } catch (err) {
       return { ok: false, text: String((err as Error).message) };
     }
@@ -238,15 +265,17 @@ export class McpStdioTransport implements StudioTransport {
   }
 
   async getConsole(maxLines = 40): Promise<StudioResult> {
-    return this.#callTool(this.#resolveTool("get_console_output"), {
-      max_lines: maxLines,
-    });
+    // Schema only accepts studio_id — max_lines is not a server parameter,
+    // so the argument is intentionally NOT sent (kept in the seam for fake).
+    void maxLines;
+    return this.#callTool(this.#resolveTool("get_console_output"), {});
   }
 
   async searchGameTree(path: string, maxDepth: number): Promise<StudioTreeEntry[]> {
     const res = await this.#callTool(this.#resolveTool("search_game_tree"), {
-      path,
-      max_depth: maxDepth,
+      datamodel_type: "Edit",
+      ...(path ? { path } : {}),
+      max_depth: Math.min(maxDepth, 10),
     });
     return this.#parseMaybeJsonArray<StudioTreeEntry>(res.text);
   }
@@ -258,6 +287,7 @@ export class McpStdioTransport implements StudioTransport {
   async readScript(path: string): Promise<StudioScript | null> {
     const res = await this.#callTool(this.#resolveTool("script_read"), {
       target_file: path,
+      should_read_entire_file: true,
     });
     if (!res.ok) return null;
     const parsed = this.#parseMaybeJsonObject<{ path?: string; className?: string; source?: string; Name?: string; Source?: string; ClassName?: string }>(
@@ -291,7 +321,8 @@ export class McpStdioTransport implements StudioTransport {
   }
 
   async grepScripts(pattern: string): Promise<Array<{ path: string; line: number; text: string }>> {
-    const res = await this.#callTool(this.#resolveTool("script_grep"), { pattern });
+    // StudioMCP's key is "query", not "pattern".
+    const res = await this.#callTool(this.#resolveTool("script_grep"), { query: pattern });
     const hits: Array<{ path: string; line: number; text: string }> = [];
     for (const line of res.text.split("\n")) {
       const m = /^(.+?):(\d+):\s?(.*)$/.exec(line.trim());
@@ -301,7 +332,11 @@ export class McpStdioTransport implements StudioTransport {
   }
 
   async screenCapture(): Promise<StudioResult> {
-    return this.#callTool(this.#resolveTool("screen_capture"), {});
+    // capture_id is required — an incrementing label like "ScreenCapture_1".
+    this.#captureSeq += 1;
+    return this.#callTool(this.#resolveTool("screen_capture"), {
+      capture_id: `ScreenCapture_${this.#captureSeq}`,
+    });
   }
 
   /**
@@ -315,7 +350,11 @@ export class McpStdioTransport implements StudioTransport {
     const echoes: string[] = [];
     for (const edit of edits) {
       const current = await this.readScript(edit.path);
+      // Real schema: file_path (dot-path, auto-created), datamodel_type,
+      // edits[{old_string,new_string,replace_all?}] — whole-file strategy
+      // rides on old_string being the ENTIRE current source.
       const args: Record<string, unknown> = {
+        file_path: edit.path,
         datamodel_type: "Edit",
         edits: [
           {
@@ -324,12 +363,7 @@ export class McpStdioTransport implements StudioTransport {
           },
         ],
       };
-      if (current) args.target_file = edit.path;
-      else {
-        // create form — current is definitively null here
-        args.target_file = edit.path;
-        args.className = "Script";
-      }
+      if (!current) args.className = "Script";
       const res = await this.#callTool(tool, args);
       if (!res.ok) return res;
       // Surface each server response — doubles as an argument echo for tests

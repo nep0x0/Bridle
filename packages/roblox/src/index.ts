@@ -77,12 +77,13 @@ async function robloxSetup(ctx: PluginContext, opts: RobloxOptions): Promise<voi
     (config.studioMcpPath
       ? await (async () => {
           // R4: live MCP stdio transport. On Windows run the exe directly;
-          // elsewhere through the configured wine command.
+          // elsewhere through the configured wine command + prefix.
           const isWindows = process.platform === "win32";
           const command = isWindows ? config.studioMcpPath : config.wineCmd || "wine";
           const args = isWindows ? [] : [config.studioMcpPath];
+          const env = !isWindows && config.winePrefix ? { WINEPREFIX: config.winePrefix } : undefined;
           log(`roblox: launching live StudioMCP: ${command} ${args.join(" ")}`);
-          return await McpStdioTransport.connect({ command, args, log });
+          return await McpStdioTransport.connect({ command, args, env, log });
         })()
       : new FakeStudioTransport());
   if (transport.kind === "fake" && !opts.transport) {

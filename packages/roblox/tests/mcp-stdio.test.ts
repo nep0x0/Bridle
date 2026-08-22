@@ -61,21 +61,33 @@ describe("McpStdioTransport (R4) vs fake StudioMCP", () => {
     expect(inspect.text).toContain("(Script)");
   });
 
-  it("multi_edit: create form uses old_string:\"\"; replace form swaps full source", async () => {
+  it("multi_edit: real schema (file_path) with create/replace forms + studio_id injected", async () => {
     const t = await open();
     toClose.push(t);
 
     // CREATE: current read returns not-found ⇒ old_string:"" + className
     const create = await t.multiEdit([{ path: "Game.Created", source: "return 42" }]);
+    expect(create.text).toContain('"file_path":"Game.Created"');
     expect(create.text).toContain('"old_string":""');
     expect(create.text).toContain('"new_string":"return 42"');
     expect(create.text).toContain('"className":"Script"');
 
     // REPLACE: Game.Existing exists ⇒ old_string must be its FULL source.
     const replace = await t.multiEdit([{ path: "Game.Existing", source: "print(2)" }]);
+    expect(replace.text).toContain('"file_path":"Game.Existing"');
     expect(replace.text).toContain('"old_string":"print(1)"');
     expect(replace.text).toContain('"new_string":"print(2)"');
-    expect(replace.text).toContain('"target_file":"Game.Existing"');
+    expect(replace.text).toContain('"datamodel_type":"Edit"');
+    void create;
+  });
+
+  it("injects studio_id into every call (single-instance fallback: empty)", async () => {
+    const t = await open();
+    toClose.push(t);
+    await t.executeLuau("x=1");
+    // The multi_edit echo carries the full arguments object — assert there.
+    const r = await t.multiEdit([{ path: "Game.Existing", source: "print(3)" }]);
+    expect(r.text).toContain('"studio_id":""');
   });
 
   it("argument shapes are pinned via the fixture echo", async () => {

@@ -32,9 +32,12 @@ describe.skipIf(!live || !cfg.studioMcpPath)("LIVE: StudioMCP over stdio", () =>
     async () => {
       const command = isWindows ? cfg!.studioMcpPath : cfg!.wineCmd || "wine";
       const args = isWindows ? [] : [cfg!.studioMcpPath];
+      const env =
+        !isWindows && cfg!.winePrefix ? { WINEPREFIX: cfg!.winePrefix } : undefined;
       const t = await McpStdioTransport.connect({
         command,
         args,
+        env,
         requestTimeoutMs: 45_000,
         toolsReadyTimeoutMs: 60_000,
         log: (m) => console.log(`[live] ${m}`),
