@@ -57,7 +57,12 @@ ZeroScript-Free (GPL-3.0), original expression — see
 
 - Only DeepSeek is wired; other providers need sibling adapters.
 - Only the newest message since the last assistant turn is injected (the site
-  thread already holds earlier turns).
+  thread already holds earlier turns). **Use a FRESH chat per test run** —
+  re-running the identical prompt into an old thread makes the model re-deliberate
+  over duplicated history and slows reasoning massively.
+- DeepSeek reasoning can run for minutes before any answer block mounts; the
+  adapter tolerates it (progress-based warmup, 150s cap) but a fresh chat is
+  still the fastest path.
 - No popup/config UI yet: the gateway URL is the compiled-in default.
 - Completion detection is heuristic (stability window + stop-glyph probe);
   site redeployments may require selector updates in `deepseek.js`.

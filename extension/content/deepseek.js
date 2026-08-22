@@ -32,14 +32,20 @@
     sendBtn: ".ds-button--primary",
   };
 
-  // Completion tuning (ms): a reply counts as done when the newest visible
-  // markdown has been UNCHANGED for idleMs AND no stop-glyph is showing.
-  // Streaming replies dip for seconds mid-generation, hence the long idle bar.
+  // Completion tuning (ms). Two hard-won facts shape these numbers:
+  //  1. DeepSeek's REASONING phase can run for minutes BEFORE any answer
+  //     markdown mounts (.ds-markdown outside .ds-think-content) — the old
+  //     45s warmup kept dying mid-think. We now wait for page PROGRESS
+  //     instead: any growth of the conversation tail proves the model is
+  //     alive, and only a fully quiet page gives up early.
+  //  2. A reply counts as done when the newest visible markdown has been
+  //     UNCHANGED for idleMs AND no stop-glyph is showing.
   const TIMINGS = {
     pollMs: 250,
-    idleMs: 1500,
-    warmupMs: 45_000, // empty turn container may precede the first token
-    timeoutMs: 170_000,
+    idleMs: 2000,
+    warmupMs: 150_000,      // absolute cap for "no answer block yet"
+    progressIdleMs: 45_000, // page totally quiet this long ⇒ something broke
+    overallMs: 165_000,     // stays under the worker's 175s watchdog
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -60,6 +66,50 @@
   function newestReplyText() {
     const blocks = markdownBlocks();
     return blockText(blocks[blocks.length - 1]);
+  }
+
+  /** Cheap "is anything growing?" signature for the reasoning-tolerant
+   *  warmup: conversation item count + tail item's text length. */
+  function activitySignature() {
+    const items = document.querySelectorAll(SEL.item);
+    const last = items[items.length - 1];
+    return {
+      items: items.length,
+      tailLen: last ? (last.textContent || "").length : 0,
+    };
+  }
+
+  /** Wait until a NEW answer block exists. Reasoning-tolerant: page progress
+   *  (item growth) keeps resetting the give-up timer; only a page that is
+   *  both quiet AND answerless for progressIdleMs fails early. */
+  async function waitForNewReply(baselineCount, deadline) {
+    const startedAt = Date.now();
+    let sig = activitySignature();
+    let lastProgressAt = startedAt;
+    let announced = false;
+    while (markdownBlocks().length <= baselineCount) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `no answer block within ${Math.round(TIMINGS.warmupMs / 1000)}s ` +
+            `(reasoning can be slow — try a fresh chat)`,
+        );
+      }
+      const cur = activitySignature();
+      if (cur.items !== sig.items || cur.tailLen !== sig.tailLen) {
+        lastProgressAt = Date.now();
+        if (!announced && cur.tailLen > 0) {
+          announced = true;
+          console.info("[bridle] model is generating (possibly reasoning) …");
+        }
+      }
+      sig = cur;
+      if (Date.now() - lastProgressAt > TIMINGS.progressIdleMs) {
+        throw new Error(
+          `page went quiet for ${Math.round(TIMINGS.progressIdleMs / 1000)}s without an answer block`,
+        );
+      }
+      await sleep(TIMINGS.pollMs);
+    }
   }
 
   /** Heuristic stop-glyph probe: while streaming, the primary footer button
@@ -141,25 +191,18 @@
 
   async function render(messages, tools) {
     const outgoing = composeOutgoing(messages, tools);
+    const startedAt = Date.now();
+    const deadline = startedAt + TIMINGS.overallMs; // shared by both phases
     const baselineCount = markdownBlocks().length;
 
     insertText(outgoing);
     await sleep(50); // let React settle before clicking
     clickSend();
 
-    // Wait for a NEW reply block to appear (warmup), then for it to go quiet.
-    const startedAt = Date.now();
-    const warmDeadline = startedAt + TIMINGS.warmupMs;
-    while (markdownBlocks().length <= baselineCount) {
-      if (Date.now() > warmDeadline) {
-        throw new Error(`no reply appeared within ${TIMINGS.warmupMs}ms`);
-      }
-      await sleep(TIMINGS.pollMs);
-    }
+    await waitForNewReply(baselineCount, deadline);
 
     let prev = "";
     let stableSince = 0;
-    const deadline = Date.now() + TIMINGS.timeoutMs;
     while (Date.now() < deadline) {
       await sleep(TIMINGS.pollMs);
       const t = newestReplyText();
