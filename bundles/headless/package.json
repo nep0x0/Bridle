@@ -6,7 +6,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "bridle": "./bin/bridle.mjs" },
+  "bin": { "bridle": "./bin/bridle.mjs", "bridle-webchat": "./bin/bridle-webchat.mjs" },
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "scripts": {
     "build": "tsc -p tsconfig.json",
