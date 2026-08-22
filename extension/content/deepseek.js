@@ -144,6 +144,127 @@
     return Boolean(btn.querySelector("svg rect") || d.startsWith("M2"));
   }
 
+  // ── status bar (in-flow above the composer, ZS-style placement) ───────
+  //
+  // Placement strategy adopted from ZeroScript's core/main.js placeBar():
+  // find the lowest ancestor of the textarea that CONTAINS the send button
+  // but NOT the model-mode tabs — that is the rounded input box itself — and
+  // live there as its first child (full width, reflows cleanly). A periodic
+  // anchoring pass self-heals after SPA re-renders.
+
+  const BAR_ID = "bridle-status-bar";
+
+  /** Lowest textarea ancestor holding the send button but no mode tabs. */
+  function barMount() {
+    let ta;
+    try {
+      ta = getEditor();
+    } catch {
+      return null;
+    }
+    if (!ta) return null;
+    const send = document.querySelector(SEL.sendBtn);
+    const group = document.querySelector('[role="radiogroup"]');
+    let box = ta.parentElement;
+    while (box && box !== document.body) {
+      const holdsSend = !send || box.contains(send);
+      const holdsTabs = group && box.contains(group);
+      if (holdsSend && !holdsTabs) break;
+      box = box.parentElement;
+    }
+    if (!box || box === document.body) box = ta.parentElement;
+    let before = box.firstElementChild;
+    if (before && before.id === BAR_ID) before = before.nextElementSibling;
+    return { parent: box, before };
+  }
+
+  /** One anchoring pass: create if missing, re-home if re-rendered away. */
+  function placeStatus() {
+    const mount = barMount();
+    if (!mount) return;
+    let bar = document.getElementById(BAR_ID);
+    if (!bar || !bar.isConnected) {
+      bar = document.createElement("div");
+      bar.id = BAR_ID;
+      bar.style.cssText = [
+        "width:100%", "margin:0 0 8px 0",
+        "display:flex", "gap:10px", "align-items:center",
+        "padding:6px 12px", "border-radius:12px",
+        "background:#0f1420e6", "color:#d7e3ff",
+        "font:600 12px/1.4 system-ui,sans-serif",
+        "border:1px solid #2a3550",
+        "pointer-events:none", "white-space:nowrap", "overflow:hidden",
+      ].join(";");
+      mount.parent.insertBefore(bar, mount.before ?? null);
+      if (!lastStatusRendered) return; // content arrives with next status msg
+    }
+    if (bar.parentElement !== mount.parent) {
+      try {
+        mount.parent.insertBefore(bar, mount.before ?? null);
+      } catch { /* transient SPA churn */ }
+    }
+  }
+
+  let lastStatusRendered = { gateway: false, tools: null, adapters: 0 };
+
+  function renderStatus(s) {
+    lastStatusRendered = s;
+    placeStatus();
+    const bar = document.getElementById(BAR_ID);
+    if (!bar) return;
+    const dot = (on) =>
+      `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
+    const tools =
+      typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
+    bar.innerHTML =
+      `<span style="letter-spacing:.4px">BRIDLE</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
+      `<span>${tools}</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(s.adapters > 0)} chat tab</span>`;
+  }
+
+  // ── composer mode: pick Expert/"Pakar" so the brain actually thinks ────
+  //
+  // DeepSeek V4 model radios carry data-model-type ("default"=Instant,
+  // "expert", "vision"); older builds used a separate DeepThink toggle.
+  // Radios DISAPPEAR once a conversation starts — this runs before every
+  // send, silently doing nothing when they are already gone.
+
+  const nodeText = (n) => ((n && (n.innerText || n.textContent)) || "").trim();
+
+  function ensureDeepThinking() {
+    const group = document.querySelector('[role="radiogroup"]');
+    const radios = group
+      ? [...group.querySelectorAll('[role="radio"]')]
+      : [...document.querySelectorAll('[role="radio"]')];
+    const expert =
+      radios.find((r) => r.getAttribute("data-model-type") === "expert") ||
+      radios.find((r) => /pakar|expert|专家|专业/i.test(nodeText(r)));
+    if (expert) {
+      if (expert.getAttribute("aria-checked") !== "true") {
+        try {
+          expert.click();
+          console.info("[bridle] composer mode -> expert");
+        } catch { /* best effort */ }
+      }
+      return;
+    }
+    // Legacy fallback: a separate DeepThink toggle.
+    const tg = [...document.querySelectorAll(".ds-toggle-button")].find((t) =>
+      /deep\s*think|deepthink|pikir/i.test(nodeText(t)),
+    );
+    const off =
+      tg &&
+      (tg.getAttribute("aria-pressed") === "false" ||
+        !tg.classList.contains("ds-toggle-button--selected"));
+    if (tg && off) {
+      try {
+        tg.click();
+        console.info("[bridle] legacy DeepThink toggled ON");
+      } catch { /* best effort */ }
+    }
+  }
+
   // ── writing the page ──────────────────────────────────────────────────
 
   function getEditor() {
@@ -216,6 +337,7 @@
     const deadline = startedAt + TIMINGS.overallMs; // shared by both phases
     const baselineCount = markdownBlocks().length;
 
+    ensureDeepThinking(); // Expert/"Pakar" before the first send of a chat
     insertText(outgoing);
     await sleep(50); // let React settle before clicking
     clickSend();
@@ -253,39 +375,6 @@
       })),
       ...(parsed.errors.length ? { error: parsed.errors.join("; ") } : {}),
     };
-  }
-
-  // ── status bar (ZS-style panel data, MVP) ─────────────────────────────
-  // Fixed pill floating above the composer: gateway / tools / adapter tabs.
-  // Body-attached so React reconciliation can never purge it.
-
-  const BAR_ID = "bridle-status-bar";
-
-  function renderStatus(s) {
-    let bar = document.getElementById(BAR_ID);
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = BAR_ID;
-      bar.style.cssText = [
-        "position:fixed", "left:50%", "transform:translateX(-50%)",
-        "bottom:118px", "z-index:2147483000",
-        "display:flex", "gap:10px", "align-items:center",
-        "padding:6px 14px", "border-radius:999px",
-        "background:#0f1420e6", "color:#d7e3ff",
-        "font:600 12px/1.4 system-ui,sans-serif",
-        "border:1px solid #2a3550", "box-shadow:0 4px 14px #0007",
-        "pointer-events:none", "white-space:nowrap",
-      ].join(";");
-      document.body?.appendChild(bar);
-    }
-    const dot = (on) => `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
-    const tools = typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
-    const adapter = s.adapters > 0;
-    bar.innerHTML =
-      `<span style="letter-spacing:.4px">BRIDLE</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
-      `<span>${tools}</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(adapter)} chat tab</span>`;
   }
 
   // ── port wiring (resilient) ───────────────────────────────────────────
@@ -356,4 +445,10 @@
   }
 
   attachPort();
+
+  // Anchoring pass for the in-flow status bar: survives SPA re-renders that
+  // detach or re-home the composer (same idea as ZS's per-frame placeBar,
+  // at a calmer cadence).
+  placeStatus();
+  setInterval(placeStatus, 600);
 })();
