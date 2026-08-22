@@ -1,0 +1,172 @@
+// bridle bridge — service worker.
+//
+// Owns the ONE WebSocket to the local gateway (@bridle/gateway-ws) and relays
+// render_request/render_result between it and content adapters over runtime
+// ports. Keeping the socket here avoids mixed-content issues inside https
+// chat pages and centralises reconnect logic, exactly like a real adapter
+// should: the page never talks to the network itself.
+//
+// Protocol (gateway ⇄ this worker), JSON frames:
+//   ← {type:"capabilities", tools:[...]}        (pushed on connect)
+//   → {type:"render_result", id, ok, text, toolCalls?, error?}
+//   ← {type:"render_request", id, messages, tools}
+//
+// Port protocol (worker ⇄ content script):
+//   port name "bridle-adapter"
+//   → {type:"render_request", id, messages, tools}
+//   ← {type:"adapter_result", id, ok, text, toolCalls?, error?}
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+const DEFAULT_URL = "ws://127.0.0.1:8642"; // = EXTENSION_DEFAULT_PORT
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 5000;
+// Answer the gateway slightly BEFORE its own default render timeout (180s)
+// so an honest error reaches the harness instead of a dropped frame.
+const RENDER_TIMEOUT_MS = 175_000;
+
+let ws = null;
+let connected = false;
+let reconnectDelay = RECONNECT_MIN_MS;
+let reconnectTimer = null;
+let nextId = 1;
+
+/** @type {Map<string, {resolve: Function, timer: any}>} */
+const pendingRenders = new Map();
+/** @type {Set<chrome.runtime.Port>} */
+const adapterPorts = new Set();
+
+function log(...a) {
+  console.log("[bridle-bg]", ...a);
+}
+
+// ── WebSocket lifecycle ─────────────────────────────────────────────────
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(connect, reconnectDelay);
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+}
+
+function connect() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  clearTimeout(reconnectTimer);
+  try {
+    ws = new WebSocket(DEFAULT_URL);
+  } catch (e) {
+    log("ws ctor failed:", e?.message);
+    scheduleReconnect();
+    return;
+  }
+  ws.onopen = () => {
+    connected = true;
+    reconnectDelay = RECONNECT_MIN_MS;
+    log("gateway connected at", DEFAULT_URL);
+  };
+  ws.onclose = () => {
+    connected = false;
+    failAllPending("gateway connection closed");
+    scheduleReconnect();
+  };
+  ws.onerror = () => {
+    try { ws.close(); } catch { /* already closing */ }
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try {
+      msg = JSON.parse(String(ev.data));
+    } catch {
+      return; // ignore malformed frames honestly
+    }
+    if (msg.type === "render_request" && msg.id) handleRenderRequest(msg);
+  };
+}
+
+function sendResult(id, fields) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "render_result", id, ...fields }));
+}
+
+function failAllPending(reason) {
+  for (const [, p] of pendingRenders) {
+    clearTimeout(p.timer);
+    p.resolve({ ok: false, text: "", toolCalls: [], error: reason });
+  }
+  pendingRenders.clear();
+}
+
+// ── render_request fan-out to a content adapter ────────────────────────
+
+function firstOpenPort() {
+  for (const p of adapterPorts) return p;
+  return undefined;
+}
+
+function handleRenderRequest(msg) {
+  const { id } = msg;
+  const port = firstOpenPort();
+  if (!port) {
+    sendResult(id, {
+      ok: false,
+      text: "",
+      toolCalls: [],
+      error: "no chat tab with the bridle bridge is open",
+    });
+    return;
+  }
+  const entry = {
+    resolve: (fields) => {
+      pendingRenders.delete(id);
+      sendResult(id, fields);
+    },
+    // SW-side watchdog; the content adapter has its own softer deadlines.
+    timer: setTimeout(
+      () => entryResolve(id, { ok: false, text: "", toolCalls: [], error: `adapter timed out after ${RENDER_TIMEOUT_MS}ms` }),
+      RENDER_TIMEOUT_MS,
+    ),
+  };
+  function entryResolve(innerId, fields) {
+    const p = pendingRenders.get(innerId);
+    if (!p) return;
+    clearTimeout(p.timer);
+    p.resolve(fields);
+  }
+  pendingRenders.set(id, entry);
+  try {
+    port.postMessage({
+      type: "render_request",
+      id,
+      messages: msg.messages,
+      tools: msg.tools,
+    });
+  } catch (e) {
+    entryResolve(id, { ok: false, text: "", toolCalls: [], error: `port post failed: ${e?.message}` });
+  }
+}
+
+// ── content adapter ports ───────────────────────────────────────────────
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "bridle-adapter") return;
+  adapterPorts.add(port);
+  log("content adapter attached");
+  port.onDisconnect.addListener(() => {
+    adapterPorts.delete(port);
+    log("content adapter detached");
+    // Its in-flight renders can never answer now.
+    failAllPending("chat tab closed mid-render");
+  });
+  port.onMessage.addListener((m) => {
+    if (m?.type !== "adapter_result" || !m.id) return;
+    const p = pendingRenders.get(m.id);
+    if (!p) return;
+    p.resolve({
+      ok: Boolean(m.ok),
+      text: String(m.text ?? ""),
+      toolCalls: Array.isArray(m.toolCalls) ? m.toolCalls : [],
+      ...(m.error ? { error: String(m.error) } : {}),
+    });
+  });
+});
+
+connect();
