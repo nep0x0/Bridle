@@ -152,3 +152,14 @@ terhadap fake MCP server child-process; suite live bersifat opt-in
 (`BRIDLE_LIVE_STUDIO=1`) dan skip jujur tanpa Studio. **Belum tuntas:**
 satu lari nyata vs Roblox Studio (butuh Windows/macOS) untuk memvalidasi
 bentuk argumen di tabel pemetaan + angka benchmark mini.
+
+**Update 2026-08-23 — GERBANG LIVE TERCAPAI.** Dua pelajaran lapangan yang
+mengubah implementasi (keduanya bertentangan dengan schema yang diiklankan):
+1. `studio_id` TIDAK pernah ditegakkan — ZS mengirim `arguments:{}` dan
+   berhasil; kita ikut persis. Kunci "required" di schema adalah jebakan.
+2. Instans Studio mendaftar ke proxy beberapa detik SETELAH proxy hidup —
+   poll pertama hampir selalu `"studios":[]`; klien harus sabar.
+
+Live run: wine sistem + WINEPREFIX vinegar (`prefixes/studio`), 27 tool,
+instance "ai play test" terdaftar, get_studio_state menjawab mode Edit.
+Sisa non-gate: angka benchmark mini + validasi live rule destruktif §7.

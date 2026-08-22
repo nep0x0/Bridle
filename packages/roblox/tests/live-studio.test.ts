@@ -44,7 +44,18 @@ describe.skipIf(!live || !cfg.studioMcpPath)("LIVE: StudioMCP over stdio", () =>
       });
       try {
         expect(t.advertisedTools().length).toBeGreaterThan(0);
-        const state = await t.getState();
+        // The proxy registers the running Studio a few seconds after its own
+        // start (proven live: first poll empty, next poll lists the place).
+        // Retry patiently instead of failing on the first "no instances".
+        const deadline = Date.now() + 45_000;
+        let state = { ok: false, text: "(not polled)" };
+        for (;;) {
+          state = await t.getState();
+          if (state.ok) break;
+          if (Date.now() > deadline) break;
+          await new Promise((r) => setTimeout(r, 2500));
+          console.log(`[live] waiting for Studio instance … (${state.text.slice(0, 80)})`);
+        }
         expect(state.ok).toBe(true);
         expect(state.text).toMatch(/Studio Mode/i);
       } finally {

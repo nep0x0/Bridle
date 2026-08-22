@@ -61,7 +61,7 @@ describe("McpStdioTransport (R4) vs fake StudioMCP", () => {
     expect(inspect.text).toContain("(Script)");
   });
 
-  it("multi_edit: real schema (file_path) with create/replace forms + studio_id injected", async () => {
+  it("multi_edit: real schema (file_path) with create/replace forms, no studio_id", async () => {
     const t = await open();
     toClose.push(t);
 
@@ -81,13 +81,13 @@ describe("McpStdioTransport (R4) vs fake StudioMCP", () => {
     void create;
   });
 
-  it("injects studio_id into every call (single-instance fallback: empty)", async () => {
+  it("sends NO studio_id at all — the field ZeroScript proved unnecessary", async () => {
     const t = await open();
     toClose.push(t);
-    await t.executeLuau("x=1");
-    // The multi_edit echo carries the full arguments object — assert there.
+    // The multi_edit echo carries the full arguments object — assert the
+    // absence of the key the advertised schema falsely calls required.
     const r = await t.multiEdit([{ path: "Game.Existing", source: "print(3)" }]);
-    expect(r.text).toContain('"studio_id":""');
+    expect(r.text).not.toContain("studio_id");
   });
 
   it("argument shapes are pinned via the fixture echo", async () => {

@@ -62,10 +62,6 @@ export class McpStdioTransport implements StudioTransport {
   #nextId = 1;
   #pending = new Map<number, Pending>();
   #toolNames: string[] = [];
-  /** Every StudioMCP tool requires studio_id ("use list_roblox_studios").
-   *  Discovered at connect; empty string is the honest single-instance
-   *  fallback when the discovery tool itself is not advertised. */
-  #studioId = "";
   #captureSeq = 0;
   #stderrTail: string[] = [];
   #opts: Required<Pick<McpStdioOptions, "requestTimeoutMs" | "toolsReadyTimeoutMs">> & {
@@ -114,7 +110,6 @@ export class McpStdioTransport implements StudioTransport {
       });
       t.#notify("notifications/initialized");
       await t.#waitToolsReady();
-      await t.#discoverStudioId();
       return t;
     } catch (err) {
       t.close();
@@ -215,28 +210,13 @@ export class McpStdioTransport implements StudioTransport {
     );
   }
 
-  async #discoverStudioId(): Promise<void> {
-    if (!this.#toolNames.includes("list_roblox_studios")) return; // keep ""
-    try {
-      const res = await this.#callTool("list_roblox_studios", {});
-      const arr = this.#parseMaybeJsonArray<{ id?: string; studio_id?: string }>(res.text);
-      const first = arr[0];
-      if (first) {
-        this.#studioId = String(first.id ?? first.studio_id ?? "");
-        this.#opts.log(`StudioMCP: studio_id=${this.#studioId || "(empty)"}`);
-      }
-    } catch (e) {
-      this.#opts.log(`StudioMCP: list_roblox_studios failed (${String((e as Error).message).slice(0, 80)}) — using empty studio_id`);
-    }
-  }
-
   async #callTool(tool: string, args: Record<string, unknown>): Promise<StudioResult> {
-    // studio_id is REQUIRED on every StudioMCP tool — injected centrally so
-    // no mapping can forget it.
-    const full = { studio_id: this.#studioId, ...args };
+    // NOTE: despite "required" in the advertised schema, StudioMCP does NOT
+    // enforce studio_id — ZeroScript's proven bridge sends arguments WITHOUT
+    // it and works. We do the same; extra keys only risk strict rejection.
     let msg: JsonRpcResponse;
     try {
-      msg = await this.#request("tools/call", { name: tool, arguments: full });
+      msg = await this.#request("tools/call", { name: tool, arguments: args });
     } catch (err) {
       return { ok: false, text: String((err as Error).message) };
     }
