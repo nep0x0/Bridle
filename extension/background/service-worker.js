@@ -40,6 +40,18 @@ let heartbeatTimer = null;
 let lastMessageAt = 0;
 let nextId = 1;
 
+/** Mirrors what the in-page status bar shows (ZS-style panel data). */
+const status = { gateway: false, tools: null, adapters: 0 };
+
+function broadcastStatus() {
+  status.adapters = adapterPorts.size;
+  for (const p of adapterPorts) {
+    try {
+      p.postMessage({ type: "status", ...status });
+    } catch { /* port closing */ }
+  }
+}
+
 /** @type {Map<string, {resolve: Function, timer: any}>} */
 const pendingRenders = new Map();
 /** @type {Set<chrome.runtime.Port>} */
@@ -71,17 +83,22 @@ function connect() {
     connected = true;
     reconnectDelay = RECONNECT_MIN_MS;
     lastMessageAt = Date.now();
+    status.gateway = true;
     log("gateway connected at", DEFAULT_URL);
     startHeartbeat();
     // Re-announce any content adapters that attached while we were offline.
     for (const p of adapterPorts) {
       sendFrame({ type: "adapter_ready", url: p.sender?.tab?.url });
     }
+    broadcastStatus();
   };
   ws.onclose = () => {
     connected = false;
+    status.gateway = false;
+    status.tools = null;
     stopHeartbeat();
     failAllPending("gateway connection closed");
+    broadcastStatus();
     scheduleReconnect();
   };
   ws.onerror = () => {
@@ -94,6 +111,11 @@ function connect() {
       msg = JSON.parse(String(ev.data));
     } catch {
       return; // ignore malformed frames honestly
+    }
+    if (msg.type === "capabilities") {
+      status.tools = Array.isArray(msg.tools) ? msg.tools.length : null;
+      broadcastStatus();
+      return;
     }
     if (msg.type === "render_request" && msg.id) handleRenderRequest(msg);
   };
@@ -202,11 +224,16 @@ chrome.runtime.onConnect.addListener((port) => {
   if (!sendFrame({ type: "adapter_ready", url })) {
     log("adapter attached while gateway socket down — will re-announce on reconnect");
   }
+  // Give the fresh port the current status immediately (status bar MVP).
+  try {
+    port.postMessage({ type: "status", ...status, adapters: adapterPorts.size });
+  } catch { /* never mind */ }
   port.onDisconnect.addListener(() => {
     adapterPorts.delete(port);
     log("content adapter detached");
     // Its in-flight renders can never answer now.
     failAllPending("chat tab closed mid-render");
+    broadcastStatus();
   });
   port.onMessage.addListener((m) => {
     if (m?.type !== "adapter_result" || !m.id) return;

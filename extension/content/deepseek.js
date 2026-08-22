@@ -39,15 +39,30 @@
   //     instead: any growth of the conversation tail proves the model is
   //     alive, and only a fully quiet page gives up early.
   //  2. A reply counts as done when the newest visible markdown has been
-  //     UNCHANGED for idleMs AND no stop-glyph is showing.
+  //     UNCHANGED for idleMs AND no stop-glyph is showing. Streaming pauses
+  //     >2s mid-code-block were seen live (cost us a truncated tool call:
+  //     final text ended at "part.B"), hence idleMs=3500 PLUS the
+  //     wire-truncation guard below.
   const TIMINGS = {
     pollMs: 250,
-    idleMs: 2000,
+    idleMs: 3500,
     warmupMs: 150_000,      // absolute cap for "no answer block yet"
     progressIdleMs: 45_000, // page totally quiet this long ⇒ something broke
     overallMs: 165_000,     // stays under the worker's 175s watchdog
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /** Wire-aware truncation guard: if the tail looks like an UNFINISHED tool
+   *  envelope (ours, or a bare one), the reply is definitionally still
+   *  streaming no matter how long the pause felt. */
+  function looksTruncated(text) {
+    const trimmed = text.trimEnd();
+    const tail = trimmed.slice(-500);
+    if (/(\{\s*"?\s*(?:name|calls)"?\s*:?|\bbridle-tool\b)/i.test(tail)) {
+      return !/\}\s*$/.test(trimmed);
+    }
+    return false;
+  }
 
   // ── reading the page ──────────────────────────────────────────────────
 
@@ -112,12 +127,18 @@
     }
   }
 
-  /** Heuristic stop-glyph probe: while streaming, the primary footer button
-   *  shows a square/stop shape instead of the send arrow. Combined with the
-   *  stability window so a selector miss degrades to slower-but-correct. */
-  function stopGlyphVisible() {
+  /** Heuristic "still generating" probe, multi-signal:
+   *    - .ds-loading overlay present
+   *    - primary button carries a stop-ish glyph (rect shape / M2-path) or a
+   *      stop-labelled aria/title (locale-tolerant)
+   *  Combined with the stability window + truncation guard so ANY single
+   *  selector miss degrades to slower-but-correct, never wrong. */
+  function generatingVisible() {
+    if (document.querySelector(SEL.generating)) return true;
     const btn = document.querySelector(SEL.sendBtn);
     if (!btn) return false;
+    const label = `${btn.getAttribute("aria-label") ?? ""} ${btn.getAttribute("title") ?? ""}`.toLowerCase();
+    if (/stop|berhenti|停止/.test(label)) return true;
     const shape = btn.querySelector("svg rect, svg path");
     const d = shape?.getAttribute("d") || "";
     return Boolean(btn.querySelector("svg rect") || d.startsWith("M2"));
@@ -206,15 +227,19 @@
     while (Date.now() < deadline) {
       await sleep(TIMINGS.pollMs);
       const t = newestReplyText();
-      if (t && t === prev) {
+      if (t && t === prev && !looksTruncated(t)) {
         if (!stableSince) stableSince = Date.now();
-        if (Date.now() - stableSince >= TIMINGS.idleMs && !stopGlyphVisible()) break;
+        if (Date.now() - stableSince >= TIMINGS.idleMs && !generatingVisible()) break;
+        // looksTruncated ⇒ deliberately fall through: still streaming.
       } else {
         prev = t;
         stableSince = 0;
       }
     }
     if (!prev) throw new Error("reply stayed empty until the deadline");
+    if (looksTruncated(prev)) {
+      console.warn("[bridle] deadline hit while the tool envelope still looked unfinished");
+    }
     console.info(`[bridle] reply captured (${prev.length} chars): ${prev.slice(0, 120).replace(/\n/g, " ")}`);
 
     const parsed = Wire.parseToolCalls(prev);
@@ -228,6 +253,39 @@
       })),
       ...(parsed.errors.length ? { error: parsed.errors.join("; ") } : {}),
     };
+  }
+
+  // ── status bar (ZS-style panel data, MVP) ─────────────────────────────
+  // Fixed pill floating above the composer: gateway / tools / adapter tabs.
+  // Body-attached so React reconciliation can never purge it.
+
+  const BAR_ID = "bridle-status-bar";
+
+  function renderStatus(s) {
+    let bar = document.getElementById(BAR_ID);
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = BAR_ID;
+      bar.style.cssText = [
+        "position:fixed", "left:50%", "transform:translateX(-50%)",
+        "bottom:118px", "z-index:2147483000",
+        "display:flex", "gap:10px", "align-items:center",
+        "padding:6px 14px", "border-radius:999px",
+        "background:#0f1420e6", "color:#d7e3ff",
+        "font:600 12px/1.4 system-ui,sans-serif",
+        "border:1px solid #2a3550", "box-shadow:0 4px 14px #0007",
+        "pointer-events:none", "white-space:nowrap",
+      ].join(";");
+      document.body?.appendChild(bar);
+    }
+    const dot = (on) => `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
+    const tools = typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
+    const adapter = s.adapters > 0;
+    bar.innerHTML =
+      `<span style="letter-spacing:.4px">BRIDLE</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
+      `<span>${tools}</span>` +
+      `<span style="display:flex;gap:4px;align-items:center">${dot(adapter)} chat tab</span>`;
   }
 
   // ── port wiring (resilient) ───────────────────────────────────────────
@@ -256,6 +314,10 @@
       });
 
       port.onMessage.addListener((m) => {
+        if (m?.type === "status") {
+          renderStatus(m);
+          return;
+        }
         if (m?.type !== "render_request") return;
         if (busy) {
           port.postMessage({
