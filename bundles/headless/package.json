@@ -26,6 +26,7 @@
     "@bridle/gateway-ws": "workspace:*",
     "@bridle/kernel": "workspace:*",
     "@bridle/llm": "workspace:*",
+    "@bridle/roblox": "workspace:*",
     "@bridle/security": "workspace:*",
     "@bridle/session": "workspace:*",
     "@bridle/tools": "workspace:*",

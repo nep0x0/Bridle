@@ -29,6 +29,9 @@ importers:
       '@bridle/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@bridle/roblox':
+        specifier: workspace:*
+        version: link:../../packages/roblox
       '@bridle/security':
         specifier: workspace:*
         version: link:../../packages/security

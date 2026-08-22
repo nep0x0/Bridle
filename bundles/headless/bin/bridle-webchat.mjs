@@ -23,12 +23,17 @@ import {
 } from "@bridle/gateway-ws";
 import { listApprover } from "@bridle/security";
 import { blockingConsoleApprover } from "@bridle/security/node";
+import { robloxPlugin } from "@bridle/roblox";
 
 // ── CLI flags ────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const allowIdx = [];
+const robloxFlag = argv.includes("--roblox"); // mount the Roblox domain
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--allow") allowIdx.push(i);
+}
+for (let i = argv.length - 1; i >= 0; i--) {
+  if (argv[i] === "--roblox") argv.splice(i, 1);
 }
 const allowedTools = allowIdx.map((i) => argv[i + 1]).filter(Boolean).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean);
 for (const i of [...allowIdx].reverse()) argv.splice(i, 2);
@@ -57,6 +62,21 @@ const bridle = await createBridle({
     approver,
   },
 });
+
+// ── Roblox domain (--roblox) ────────────────────────────────────────────
+// Mounted AFTER createBridle so workflow/security exist, BEFORE listening so
+// the capabilities frame already advertises the roblox tools.
+if (robloxFlag) {
+  await bridle.ctx.mount(
+    robloxPlugin({
+      log: (m) => console.log("[roblox]", m),
+      // live transport resolves from config automatically (BRIDLE_STUDIO_MCP
+      // or detected vinegar path); without it → deterministic FakeStudio.
+    }),
+  );
+  console.log("[bridle] roblox domain mounted");
+}
+
 await gw.listen();
 console.log("[bridle] tools:", bridle.tools.list().map((t) => t.name).join(", "));
 console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
