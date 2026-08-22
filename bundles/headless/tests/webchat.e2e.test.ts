@@ -8,7 +8,7 @@
  * actual DOM driving is real (gateway ws frames, agent loop, tools pipeline,
  * session log, and the tool-call wire format).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 // Side-effect import: registers globalThis.BridleWire. We deliberately test
 // the exact file the extension ships, not a copy of it.
@@ -38,6 +38,12 @@ function fakeAdapter(port: number) {
 
   ws.on("message", (raw) => {
     const msg = JSON.parse(String(raw));
+    // Mirror what the real service worker does: announce readiness upstream
+    // as soon as a content adapter (here: this fake) attaches.
+    if (msg.type === "capabilities") {
+      ws.send(JSON.stringify({ type: "adapter_ready", url: "fake://chat-tab" }));
+      return;
+    }
     if (msg.type !== "render_request") return;
     renders++;
     lastRequest = msg;
@@ -103,6 +109,9 @@ describe("M3 gate: harness turns over the webchat gateway", () => {
     const caps = await client.firstFrame;
     expect(caps.type).toBe("capabilities");
     expect(caps.tools.map((t: Frame) => t.name)).toContain("math.eval");
+    // The fake adapter announced readiness — the runner's wait condition.
+    // Announcement processing is async, so poll instead of asserting cold.
+    await vi.waitFor(() => expect(gw.hasReadyAdapter()).toBe(true));
 
     const res = await bridle.run("What is 12*9? Use the math tool.");
 

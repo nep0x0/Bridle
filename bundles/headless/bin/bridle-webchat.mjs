@@ -38,20 +38,28 @@ console.log(`[bridle] starting harness; gateway will listen on ws://127.0.0.1:${
 const bridle = await createBridle({ adapter: gw.webchatAdapter(), maxSteps: 6 });
 await gw.listen();
 console.log("[bridle] tools:", bridle.tools.list().map((t) => t.name).join(", "));
-console.log("[bridle] waiting for the extension's adapter to connect …");
+console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
 
-// Wait until a chat tab attaches (or bail after 90s with an honest message).
+// Wait until a content adapter announces itself (`adapter_ready`), not just
+// until the service worker's socket is up — the socket alone does NOT mean
+// any chat tab is wired. Bail after 90s with an honest message.
 const adapterDeadline = Date.now() + 90_000;
-while (!gw.hasAdapter()) {
+while (!gw.hasReadyAdapter()) {
   if (Date.now() > adapterDeadline) {
     console.error(
-      "[bridle] no adapter connected within 90s — is the extension loaded and a" +
-        " chat.deepseek.com tab open? See extension/README.md.",
+      "[bridle] no chat tab attached within 90s. Checklist:\n" +
+        "  1. extension loaded unpacked from ./extension (chrome://extensions)\n" +
+        "  2. a chat.deepseek.com tab opened or REFRESHED after loading it\n" +
+        "  3. that tab's DevTools console shows: [bridle] adapter ready\n" +
+        "See extension/README.md for details.",
     );
     await gw.close();
     process.exit(1);
   }
   await new Promise((r) => setTimeout(r, 500));
+}
+if (gw.readyAdapter?.url) {
+  console.log(`[bridle] adapter ready: ${gw.readyAdapter.url}`);
 }
 console.log("[bridle] adapter connected — running turn through the browser …\n");
 

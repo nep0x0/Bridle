@@ -25,10 +25,19 @@ const RECONNECT_MAX_MS = 5000;
 // so an honest error reaches the harness instead of a dropped frame.
 const RENDER_TIMEOUT_MS = 175_000;
 
+// MV3 service workers are suspended after ~30s idle. An OPEN socket alone
+// does not keep one alive — only websocket ACTIVITY does. A periodic ping
+// (answered by the gateway's pong) provides that activity, the same trick
+// ZeroScript's bridge uses; it also detects half-open sockets.
+const HEARTBEAT_MS = 10_000;
+const STALE_SOCKET_MS = 25_000;
+
 let ws = null;
 let connected = false;
 let reconnectDelay = RECONNECT_MIN_MS;
 let reconnectTimer = null;
+let heartbeatTimer = null;
+let lastMessageAt = 0;
 let nextId = 1;
 
 /** @type {Map<string, {resolve: Function, timer: any}>} */
@@ -61,10 +70,17 @@ function connect() {
   ws.onopen = () => {
     connected = true;
     reconnectDelay = RECONNECT_MIN_MS;
+    lastMessageAt = Date.now();
     log("gateway connected at", DEFAULT_URL);
+    startHeartbeat();
+    // Re-announce any content adapters that attached while we were offline.
+    for (const p of adapterPorts) {
+      sendFrame({ type: "adapter_ready", url: p.sender?.tab?.url });
+    }
   };
   ws.onclose = () => {
     connected = false;
+    stopHeartbeat();
     failAllPending("gateway connection closed");
     scheduleReconnect();
   };
@@ -72,6 +88,7 @@ function connect() {
     try { ws.close(); } catch { /* already closing */ }
   };
   ws.onmessage = (ev) => {
+    lastMessageAt = Date.now();
     let msg;
     try {
       msg = JSON.parse(String(ev.data));
@@ -82,9 +99,38 @@ function connect() {
   };
 }
 
+// ── heartbeat: keep the worker alive, detect half-open sockets ──────────
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (!connected) return;
+    if (lastMessageAt && Date.now() - lastMessageAt > STALE_SOCKET_MS) {
+      log("socket stale, forcing reconnect");
+      try { ws.close(); } catch { /* already closing */ }
+      return;
+    }
+    try {
+      ws.send(JSON.stringify({ type: "ping" }));
+    } catch {
+      try { ws.close(); } catch { /* already closing */ }
+    }
+  }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}
+
+function sendFrame(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(obj));
+  return true;
+}
+
 function sendResult(id, fields) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: "render_result", id, ...fields }));
+  sendFrame({ type: "render_result", id, ...fields });
 }
 
 function failAllPending(reason) {
@@ -150,6 +196,12 @@ chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "bridle-adapter") return;
   adapterPorts.add(port);
   log("content adapter attached");
+  // Announce readiness upstream: a bare socket is NOT enough for the runner
+  // to know a chat tab is actually wired up.
+  const url = port.sender?.tab?.url;
+  if (!sendFrame({ type: "adapter_ready", url })) {
+    log("adapter attached while gateway socket down — will re-announce on reconnect");
+  }
   port.onDisconnect.addListener(() => {
     adapterPorts.delete(port);
     log("content adapter detached");

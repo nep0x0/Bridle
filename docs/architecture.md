@@ -69,8 +69,13 @@ the open gate for M3.
 - **Protocol** (`@bridle/gateway-ws`, JSON frames over ws): gateway → adapter
   `{capabilities, tools}` on connect, then per turn `{render_request, id,
   messages, tools}`; adapter → `{render_result, id, ok, text, toolCalls?,
-  error?}`. The browser-side counterpart lives in `extension/` (MV3 service
-  worker owns the socket; content adapters speak a `bridle-adapter` port).
+  error?}`; keep-alive `ping`/`pong`; and an explicit
+  `{adapter_ready, url}` announcement when a content adapter attaches its
+  port — a bare socket is not readiness (the MV3 service worker connects
+  long before any tab does). The browser-side counterpart lives in
+  `extension/` (MV3 service worker owns the socket with a 10s heartbeat;
+  content adapters speak a `bridle-adapter` port and reconnect with backoff
+  when the worker is recycled).
 - **Tool wire format** (`extension/content/bridle-wire.js`): web chats have no
   function-calling channel, so tool calls ride in reply text as fenced
   ` ```bridle-tool ``` ` blocks (`{"name","args"}` or `{"calls":[...]}`);

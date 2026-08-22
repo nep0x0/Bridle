@@ -51,6 +51,9 @@ export class WebchatGateway {
   #client: WebSocket | undefined;
   #pending = new Map<string, Pending>();
   #nextId = 1;
+  /** Info from the newest `adapter_ready` frame (a chat tab actually
+   *  attached its port — stronger than a bare socket connection). */
+  #readyInfo: { url?: string } | undefined;
   readonly connections: Set<WebSocket> = new Set();
 
   constructor(
@@ -58,6 +61,16 @@ export class WebchatGateway {
     private readonly opts: GatewayOptions = {},
     private readonly logFn: (msg: string) => void = () => {},
   ) {}
+
+  /** True once an adapter announced itself with `adapter_ready`. */
+  hasReadyAdapter(): boolean {
+    return this.#readyInfo !== undefined;
+  }
+
+  /** Newest readiness info (tab URL etc.), or undefined. */
+  get readyAdapter(): { url?: string } | undefined {
+    return this.#readyInfo;
+  }
 
   /** Start listening. Resolves with the bound port. */
   listen(): Promise<number> {
@@ -115,7 +128,10 @@ export class WebchatGateway {
     ws.on("message", (raw) => this.#onMessage(String(raw)));
     ws.on("close", () => {
       this.connections.delete(ws);
-      if (this.#client === ws) this.#client = undefined;
+      if (this.#client === ws) {
+        this.#client = undefined;
+        this.#readyInfo = undefined; // readiness died with its socket
+      }
       this.logFn("webchat adapter disconnected");
     });
   }
@@ -128,11 +144,23 @@ export class WebchatGateway {
       text?: string;
       toolCalls?: LlmToolCall[];
       error?: string;
+      url?: string;
     };
     try {
       msg = JSON.parse(raw);
     } catch {
       return; // ignore malformed frames honestly (no crash)
+    }
+    if (msg.type === "ping") {
+      // Keep-alive handshake with the extension's service worker.
+      this.#client?.send(JSON.stringify({ type: "pong" }));
+      return;
+    }
+    if (msg.type === "adapter_ready") {
+      // A content adapter attached its port — the gateway can now render.
+      this.#readyInfo = { url: msg.url };
+      this.logFn(`adapter ready: ${msg.url ?? "unknown tab"}`);
+      return;
     }
     if (msg.type === "render_result" && msg.id) {
       const pending = this.#pending.get(msg.id);

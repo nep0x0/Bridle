@@ -186,41 +186,68 @@
     };
   }
 
-  // ── port wiring ───────────────────────────────────────────────────────
+  // ── port wiring (resilient) ───────────────────────────────────────────
+  //
+  // The MV3 service worker gets suspended when idle; when it does, our
+  // runtime port dies with it. Without a retry loop the adapter would die
+  // silently and every render would fail with "no chat tab". Reconnect with
+  // backoff; stop only when the extension context itself is invalidated
+  // (extension reloaded → only a page reload helps — say so honestly).
 
-  const port = chrome.runtime.connect({ name: "bridle-adapter" });
+  let port = null;
+  let retryTimer = null;
   let busy = false;
 
-  port.onMessage.addListener((m) => {
-    if (m?.type !== "render_request") return;
-    if (busy) {
-      port.postMessage({
-        type: "adapter_result",
-        id: m.id,
-        ok: false,
-        text: "",
-        toolCalls: [],
-        error: "adapter busy with another render",
-      });
-      return;
-    }
-    busy = true;
-    render(m.messages ?? [], m.tools ?? [])
-      .then((r) => port.postMessage({ type: "adapter_result", id: m.id, ...r }))
-      .catch((e) =>
-        port.postMessage({
-          type: "adapter_result",
-          id: m.id,
-          ok: false,
-          text: "",
-          toolCalls: [],
-          error: String(e?.message ?? e),
-        }),
-      )
-      .finally(() => {
-        busy = false;
-      });
-  });
+  function attachPort(attempt = 0) {
+    try {
+      port = chrome.runtime.connect({ name: "bridle-adapter" });
+      console.info("[bridle] adapter ready on", location.host);
+      attempt = 0;
 
-  console.info("[bridle] adapter ready on", location.host);
+      port.onDisconnect.addListener(() => {
+        console.warn("[bridle] port lost (service worker recycled?) — reconnecting …");
+        clearTimeout(retryTimer);
+        const delay = Math.min(1000 * 2 ** attempt, 5000);
+        retryTimer = setTimeout(() => attachPort(attempt + 1), delay);
+      });
+
+      port.onMessage.addListener((m) => {
+        if (m?.type !== "render_request") return;
+        if (busy) {
+          port.postMessage({
+            type: "adapter_result",
+            id: m.id,
+            ok: false,
+            text: "",
+            toolCalls: [],
+            error: "adapter busy with another render",
+          });
+          return;
+        }
+        busy = true;
+        render(m.messages ?? [], m.tools ?? [])
+          .then((r) => port.postMessage({ type: "adapter_result", id: m.id, ...r }))
+          .catch((e) =>
+            port.postMessage({
+              type: "adapter_result",
+              id: m.id,
+              ok: false,
+              text: "",
+              toolCalls: [],
+              error: String(e?.message ?? e),
+            }),
+          )
+          .finally(() => {
+            busy = false;
+          });
+      });
+    } catch (e) {
+      console.warn(
+        "[bridle] cannot reach the extension context (was it reloaded or updated?)",
+        "— RELOAD THIS PAGE to pick it back up. Detail:", e?.message,
+      );
+    }
+  }
+
+  attachPort();
 })();

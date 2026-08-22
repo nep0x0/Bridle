@@ -89,6 +89,25 @@ describe("webchat gateway", () => {
     ).rejects.toThrow(/render timed out/);
   });
 
+  it("answers pings and records adapter_ready announcements", async () => {
+    const gw = new WebchatGateway(() => TOOLS, {}, () => {});
+    const port = await gw.listen();
+    const { ws, first } = await connect(`ws://127.0.0.1:${port}`);
+    cleanup.push(() => ws.close());
+    cleanup.push(() => gw.close());
+    await first; // capabilities
+
+    // A bare socket is not readiness — only an explicit announcement is.
+    expect(gw.hasReadyAdapter()).toBe(false);
+    ws.send(JSON.stringify({ type: "adapter_ready", url: "https://chat.deepseek.com/" }));
+    ws.send(JSON.stringify({ type: "ping" }));
+
+    const pong = await nextMessage(ws);
+    expect(pong.type).toBe("pong");
+    expect(gw.hasReadyAdapter()).toBe(true);
+    expect(gw.readyAdapter?.url).toBe("https://chat.deepseek.com/");
+  });
+
   it("complete() without a connected adapter fails with a clear error", async () => {
     const gw = new WebchatGateway(() => TOOLS, {}, () => {});
     const port = await gw.listen();
