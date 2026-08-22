@@ -56,7 +56,7 @@ Five ideas (cordis-paradigm, clean-room implementation):
 | M0 ✅ | kernel: context/events/effects/injection | build+test green, demo runs |
 | M1 ✅ | session log (logged=visible prefix invariant) + tools pipeline + agent loop plugin | 18 tests incl. reject/rewrite/maxSteps/fork-replay |
 | M2 ✅ | llm seam + OpenAI-compatible adapter + headless bundle & CLI | E2E over real HTTP: tool-call round trip vs local mock |
-| M3 ◐ | webchat gateway ws + browser extension + deepseek/gemini adapters | live chat E2E |
+| M3 ✅ | webchat gateway ws + browser extension + DeepSeek adapter | live chat E2E ✅ (2026-08-22: real turn via chat.deepseek.com — tool-call round trip, 2 steps, no API key; Gemini adapter deferred) |
 | M4 | security gate/audit + workflow pack (plans/auto_run/scaffold) | harness verify suite |
 | M5 | roblox domain plugin | roblox verify suite vs live Studio |
 | M6 | demo-fs domain + plugin cookbook + npm publish | third-party plugin guide |
@@ -92,6 +92,15 @@ the open gate for M3.
   webchat.e2e.test.ts` runs a full harness turn through real ws frames using
   the shipped wire parser — capabilities listing, messy tool-call round trip
   (prose + unterminated fence), and honest close when a block fails to parse.
+- **Live gate met** (2026-08-22): a real chat.deepseek.com turn round-tripped
+  end to end — prompt+directive typed by the adapter, reasoning phase waited
+  out, bare tool envelope parsed from the DOM, `math.eval` executed locally,
+  result fed back as `⟦TOOL ok⟧`, final answer returned. Two lessons now
+  encoded in code: rendered fences never exist in textContent (hence the
+  bare-envelope parser) and the reasoning phase can outlast naive warmups
+  (hence progress-based waiting). Locale quirk observed: code-block toolbar
+  captions ("Salin"/"Unduh") leak into captured text — harmless, cleanup
+  deferred.
 
 ## Clean-room working rules
 

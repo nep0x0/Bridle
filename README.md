@@ -4,7 +4,10 @@
 > A universal agent harness that turns web AI chats into real agents —
 > GPL-3.0-or-later, TypeScript, powered by a Cordis-style plugin kernel.
 
-**Status: `M0 — foundation` (pre-alpha, API will change).**
+**Status: `M3 ✅ — webchat bridge live` (pre-alpha, API will change).**
+A real web-chat tab (chat.deepseek.com) now drives the harness end to end:
+prompt rendered by the browser extension, tool calls executed locally,
+results fed back into the chat — no API key.
 
 Most AI chat sites give you a brilliant brain with no hands. bridle is the
 harness: it normalizes any web-chat model into a tool-calling agent loop,
