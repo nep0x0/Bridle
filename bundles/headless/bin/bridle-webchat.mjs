@@ -26,18 +26,36 @@ import { blockingConsoleApprover } from "@bridle/security/node";
 import { robloxPlugin } from "@bridle/roblox";
 
 // ── CLI flags ────────────────────────────────────────────────────────────
+// Single left-to-right pass: splice each flag the moment it is consumed so
+// indexes never go stale (the earlier collect-then-splice version let
+// "--allow" leak into the prompt when --roblox shifted every index).
 const argv = process.argv.slice(2);
-const allowIdx = [];
-const robloxFlag = argv.includes("--roblox"); // mount the Roblox domain
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === "--allow") allowIdx.push(i);
+const allowedTools = [];
+let robloxFlag = false;
+for (let i = 0; i < argv.length; ) {
+  if (argv[i] === "--roblox") {
+    robloxFlag = true;
+    argv.splice(i, 1);
+  } else if (argv[i] === "--allow") {
+    const value = argv[i + 1];
+    if (value) {
+      for (const s of value.split(",")) {
+        const t = s.trim();
+        if (t) allowedTools.push(t);
+      }
+      argv.splice(i, 2);
+    } else {
+      argv.splice(i, 1); // --allow with no value: drop, don't misparse
+    }
+  } else {
+    i++;
+  }
 }
-for (let i = argv.length - 1; i >= 0; i--) {
-  if (argv[i] === "--roblox") argv.splice(i, 1);
+if (allowedTools.length) {
+  for (const builtin of ["echo", "now"]) {
+    if (!allowedTools.includes(builtin)) allowedTools.push(builtin); // builtins stay usable
+  }
 }
-const allowedTools = allowIdx.map((i) => argv[i + 1]).filter(Boolean).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean);
-for (const i of [...allowIdx].reverse()) argv.splice(i, 2);
-if (allowedTools.length) allowedTools.push("echo", "now"); // builtins stay usable
 
 const prompt = argv.join(" ").trim() || "What is 12*9? Use the math tool.";
 
