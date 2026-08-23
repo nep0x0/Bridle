@@ -167,30 +167,37 @@ export async function main(cliArgs = []) {
     console.log(`[bridle] adapter ready: ${gw.readyAdapter.url}`);
   }
 
-  // ── studio warmup: proxy butuh beberapa detik untuk mendaftar ke Studio ─
-  // Tanpa ini, tool call pertama model gagal "no Studio instance connected".
+  // ── studio watch: NON-BLOCKING & bebas polusi log ──────────────────────
+  // Poll dilakukan LANGSUNG lewat transport (bukan tools.execute) supaya
+  // tidak menciptakan event tool/result palsu di session log — log adalah
+  // konteks model, polling diagnostik tidak boleh ikut terlihat model.
   let studioName = null;
+  let studioState = mountRoblox ? "checking" : "off";
   let robloxTransport = null;
   if (mountRoblox) {
     try {
       robloxTransport = bridle.ctx.requireService("roblox").transport;
     } catch { /* tidak fatal */ }
-    console.log("[bridle] menunggu Studio mendaftar ke MCP proxy …");
-    const dl = Date.now() + 30_000;
-    for (;;) {
-      const r = await bridle.tools.execute("roblox.list_studios", {});
-      if (r.ok) {
-        const firstLine = r.text.split("\n")[0] ?? "";
-        studioName = firstLine.replace(/^\d+\.\s*/, "");
-        console.log(`[bridle] studio siap: ${studioName}`);
-        break;
+    console.log("[bridle] menunggu Studio mendaftar ke MCP proxy … (REPL tetap bisa dipakai)");
+    (async () => {
+      const deadline = Date.now() + 120_000; // Studio boleh dibuka belakangan
+      while (Date.now() < deadline && studioState === "checking") {
+        try {
+          const studios = await robloxTransport.listStudios();
+          if (studios.length > 0) {
+            studioName = studios[0].name ?? "(unnamed)";
+            studioState = "ready";
+            console.log(`[bridle] studio siap: ${studioName}`);
+            return;
+          }
+        } catch { /* proxy belum siap — coba lagi */ }
+        await new Promise((r) => setTimeout(r, 2000));
       }
-      if (Date.now() > dl) {
-        console.log("[bridle] Studio belum terdaftar dalam 30s — tool roblox akan gagal jujur sampai terdaftar");
-        break;
+      if (studioState === "checking") {
+        studioState = "unavailable";
+        console.log("[bridle] Studio tidak mendaftar dalam 2 menit — buka Studio, nanti terdeteksi otomatis di sesi baru");
       }
-      await new Promise((r2) => setTimeout(r2, 2000));
-    }
+    })();
   }
 
   const cleanupAll = () => {
@@ -221,7 +228,12 @@ export async function main(cliArgs = []) {
       initialPrompt: promptArg || undefined,
       verbose,
       sinkRef,
-      header: { tools: bridle.tools.list().length, studio: studioName },
+      getHeader: () => ({
+        tools: bridle.tools.list().length,
+        studio:
+          studioName ??
+          (studioState === "checking" ? "mendaftar…" : null),
+      }),
       onClose: () => { cleanupAll(); },
     });
     await gw.close().catch(() => {});

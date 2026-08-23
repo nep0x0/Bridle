@@ -38,7 +38,7 @@ export interface TuiOptions {
   verbose: boolean;
   /** Mutable sink the caller wires into turnProgressPlugin. */
   sinkRef: SinkRef;
-  header?: TuiHeader;
+  getHeader?: () => TuiHeader;
   onClose(): void;
 }
 
@@ -88,7 +88,7 @@ export function runTuiRepl(opts: TuiOptions): Promise<void> {
 }
 
 function ReplApp(props: TuiOptions & { onDone(): void }) {
-  const { bridle, commands, verbose, sinkRef, header, onDone } = props;
+  const { bridle, commands, verbose, sinkRef, getHeader, onDone } = props;
   const app = useApp();
 
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -121,6 +121,14 @@ function ReplApp(props: TuiOptions & { onDone(): void }) {
       console.error = orig.error;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Low-frequency refresh: header (tools/studio) bisa berubah kapan saja
+  // dari proses latar (studio watch) tanpa ada input baru.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((t) => t + 1), 500);
+    return () => clearInterval(iv);
   }, []);
 
   // Spinner frames only while a turn is running.
@@ -241,8 +249,8 @@ function ReplApp(props: TuiOptions & { onDone(): void }) {
             BRIDLE
           </Text>
           <Text dimColor>
-            {header?.tools ?? 0} tools
-            {header?.studio ? ` · studio: ${header.studio}` : ""}
+            {(getHeader?.().tools ?? 0)} tools
+            {getHeader?.().studio ? ` · studio: ${getHeader().studio}` : ""}
           </Text>
         </Box>
         <Box>
