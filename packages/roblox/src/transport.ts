@@ -39,6 +39,10 @@ export interface StudioTransport {
   inspectInstance(path: string): Promise<StudioResult>;
   readScript(path: string): Promise<StudioScript | null>;
   listScripts(): Promise<StudioScript[]>;
+  /** Studio instances attached to the MCP proxy — this is where the PLACE
+   *  NAME lives (e.g. "ai play test (placeId: …)"). get_studio_state only
+   *  reports mode/datamodels, never the project name. */
+  listStudios(): Promise<Array<{ id?: string; name?: string }>>;
   grepScripts(pattern: string): Promise<Array<{ path: string; line: number; text: string }>>;
   screenCapture(): Promise<StudioResult>;
 

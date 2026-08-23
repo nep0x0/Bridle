@@ -72,13 +72,16 @@ export async function main(cliArgs = []) {
 
   // ── harness + gateway ──────────────────────────────────────────────────
   // Construct first, listen later — capabilities frame then advertises all.
-  const gw = new WebchatGateway(
+  // Port override untuk sesi kedua (extension default tetap 8642).
+const GATEWAY_PORT = Number(process.env.BRIDLE_GATEWAY_PORT) || EXTENSION_DEFAULT_PORT;
+
+const gw = new WebchatGateway(
     () => bridle.tools.list(),
-    { port: EXTENSION_DEFAULT_PORT },
+    { port: GATEWAY_PORT, renderTimeoutMs: 300_000 },
     (m) => vlog("[gateway]", m),
   );
 
-  console.log(`[bridle] gateway on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
+  console.log(`[bridle] gateway on ws://127.0.0.1:${GATEWAY_PORT}${GATEWAY_PORT === EXTENSION_DEFAULT_PORT ? "" : "  (non-default — extension needs matching config)"}`);
   const bridle = await createBridle({
     adapter: gw.webchatAdapter(),
     maxSteps: 6,

@@ -285,6 +285,12 @@ export class McpStdioTransport implements StudioTransport {
     return res.text ? { path, className: "Script", source: res.text } : null;
   }
 
+  async listStudios(): Promise<Array<{ id?: string; name?: string }>> {
+    const res = await this.#callTool("list_roblox_studios", {});
+    const arr = this.#parseMaybeJsonArray<{ id?: string; name?: string; studio_id?: string }>(res.text);
+    return arr.map((s0) => ({ id: s0.id ?? s0.studio_id, name: s0.name }));
+  }
+
   async listScripts(): Promise<StudioScript[]> {
     // No guaranteed "list scripts" tool: derive from the tree.
     const entries = await this.searchGameTree("", 12);

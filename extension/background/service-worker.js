@@ -23,7 +23,8 @@ const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 5000;
 // Answer the gateway slightly BEFORE its own default render timeout (180s)
 // so an honest error reaches the harness instead of a dropped frame.
-const RENDER_TIMEOUT_MS = 175_000;
+// 280s leaves room for the content adapter's 260s overall deadline.
+const RENDER_TIMEOUT_MS = 280_000;
 
 // MV3 service workers are suspended after ~30s idle. An OPEN socket alone
 // does not keep one alive — only websocket ACTIVITY does. A periodic ping

@@ -17,6 +17,24 @@ export function readTools(t: StudioTransport): Array<ToolDef> {
       execute: () => t.getState(),
     },
     {
+      name: "roblox.list_studios",
+      description:
+        "List Studio instances attached to the MCP proxy — includes the OPEN PLACE NAME (e.g. \"ai play test (placeId: …)\"). Use this when asked what project is open.",
+      permission: "read",
+      execute: async () => {
+        const studios = await t.listStudios();
+        if (studios.length === 0) {
+          return { ok: false, text: "no Studio instance connected to the MCP proxy" };
+        }
+        return {
+          ok: true,
+          text: studios
+            .map((s0, i) => `${i + 1}. ${s0.name ?? "(unnamed)"}${s0.id ? ` [id=${s0.id}]` : ""}`)
+            .join("\n"),
+        };
+      },
+    },
+    {
       name: "roblox.get_console_output",
       description: "Read recent console output (errors surface here).",
       params: { max_lines: "number?" },

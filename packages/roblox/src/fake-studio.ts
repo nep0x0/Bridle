@@ -79,6 +79,11 @@ export class FakeStudioTransport implements StudioTransport {
     return this.#scripts.get(path) ?? null;
   }
 
+  async listStudios(): Promise<Array<{ id?: string; name?: string }>> {
+    // Deterministic single instance — the seeded place's name.
+    return [{ id: "fake-studio", name: "FakePlace (seeded)" }];
+  }
+
   async listScripts(): Promise<StudioScript[]> {
     return [...this.#scripts.values()];
   }

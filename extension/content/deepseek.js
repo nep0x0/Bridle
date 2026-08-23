@@ -46,9 +46,9 @@
   const TIMINGS = {
     pollMs: 250,
     idleMs: 3500,
-    warmupMs: 150_000,      // absolute cap for "no answer block yet"
-    progressIdleMs: 45_000, // page totally quiet this long ⇒ something broke
-    overallMs: 165_000,     // stays under the worker's 175s watchdog
+    warmupMs: 240_000,      // deep-think sessions legitimately run minutes
+    progressIdleMs: 90_000, // ZS REASON_NOREPLY_MS: reasoning can stall minutes
+    overallMs: 260_000,     // stays under worker 280s / gateway 300s
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -109,8 +109,9 @@
     while (markdownBlocks().length <= baselineCount) {
       if (Date.now() > deadline) {
         throw new Error(
-          `no answer block within ${Math.round(TIMINGS.warmupMs / 1000)}s ` +
-            `(reasoning can be slow — try a fresh chat)`,
+          `no answer block within ${Math.round(TIMINGS.warmupMs / 1000)}s — ` +
+            `the model may still be reasoning (try again or use a fresh chat); ` +
+            `last page activity ${new Date(lastProgressAt).toISOString().slice(11, 19)}`,
         );
       }
       const cur = activitySignature();
