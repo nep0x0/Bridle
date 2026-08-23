@@ -77,6 +77,22 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@26.2.0)
 
+  packages/demo-fs:
+    dependencies:
+      '@bridle/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bridle/tools':
+        specifier: workspace:*
+        version: link:../tools
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@26.2.0)
+
   packages/gateway-ws:
     dependencies:
       '@bridle/kernel':

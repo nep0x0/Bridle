@@ -37,5 +37,20 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
     "ws": "^8.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nep0x0/Bridle.git",
+    "directory": "bundles/headless"
+  },
+  "bugs": {
+    "url": "https://github.com/nep0x0/Bridle/issues"
+  },
+  "homepage": "https://github.com/nep0x0/Bridle#readme",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

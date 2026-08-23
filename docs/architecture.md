@@ -59,7 +59,7 @@ Five ideas (cordis-paradigm, clean-room implementation):
 | M3 ✅ | webchat gateway ws + browser extension + DeepSeek adapter | live chat E2E ✅ (2026-08-22: real turn via chat.deepseek.com — tool-call round trip, 2 steps, no API key; Gemini adapter deferred) |
 | M4 ✅ | security gate/audit + workflow pack (plans/auto_run/scaffold) | 8 workflow tests: lifecycle, cycles→blocked, gate integration, decision persistence |
 | M5 ✅ | roblox domain plugin (R0–R4) | **fully closed 2026-08-23**: live gate (wine+vinegar, CachyOS) + destructive-gate validated against the real place + mini benchmark **6/6 PASS** (`pnpm bench`) |
-| M6 | demo-fs domain + plugin cookbook + npm publish | third-party plugin guide |
+| M6 ✅ | demo-fs domain (`@bridle/demo-fs`, reference plugin) + plugin cookbook (`docs/plugin-cookbook.md`) + npm publish-readiness (metadata polished, `npm pack --dry-run` clean; actual registry push needs an npm account) | cookbook is the third-party plugin guide |
 
 Roblox domain design: see [domain-roblox.md](./domain-roblox.md).
 

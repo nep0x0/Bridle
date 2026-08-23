@@ -1,7 +1,7 @@
 {
-  "name": "@bridle/gateway-ws",
+  "name": "@bridle/demo-fs",
   "version": "0.1.0",
-  "description": "bridle gateway: ws server bridging the kernel to browser-side web-chat adapters",
+  "description": "bridle demo-fs: a tiny in-memory filesystem domain — the reference implementation for writing bridle domain plugins",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "./dist/index.js",
@@ -12,6 +12,12 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -19,27 +25,19 @@
   },
   "dependencies": {
     "@bridle/kernel": "workspace:*",
-    "@bridle/llm": "workspace:*",
-    "ws": "^8.18.0"
+    "@bridle/tools": "workspace:*"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nep0x0/Bridle.git",
-    "directory": "packages/gateway-ws"
+    "directory": "packages/demo-fs"
   },
   "bugs": {
     "url": "https://github.com/nep0x0/Bridle/issues"
   },
-  "homepage": "https://github.com/nep0x0/Bridle#readme",
-  "files": [
-    "dist"
-  ],
-  "publishConfig": {
-    "access": "public"
-  }
+  "homepage": "https://github.com/nep0x0/Bridle#readme"
 }

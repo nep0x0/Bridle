@@ -7,8 +7,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./node": { "types": "./dist/node/console-approver.d.ts", "import": "./dist/node/console-approver.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/console-approver.d.ts",
+      "import": "./dist/node/console-approver.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,5 +30,20 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nep0x0/Bridle.git",
+    "directory": "packages/security"
+  },
+  "bugs": {
+    "url": "https://github.com/nep0x0/Bridle/issues"
+  },
+  "homepage": "https://github.com/nep0x0/Bridle#readme",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
