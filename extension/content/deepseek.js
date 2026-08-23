@@ -56,12 +56,14 @@
    *  envelope (ours, or a bare one), the reply is definitionally still
    *  streaming no matter how long the pause felt. */
   function looksTruncated(text) {
+    // v3: deteksi envelope di SELURUH teks — kode Luau yang panjang bisa
+    // mendorong pembuka `{"name":` jauh dari 500 karakter terakhir
+    // (gagal live: jawaban terpotong di tengah string kode).
     const trimmed = text.trimEnd();
-    const tail = trimmed.slice(-500);
-    if (/(\{\s*"?\s*(?:name|calls)"?\s*:?|\bbridle-tool\b)/i.test(tail)) {
-      return !/\}\s*$/.test(trimmed);
-    }
-    return false;
+    const hasEnvelope = /("(?:name|calls)"\s*:)|(\bbridle-tool\b)/i.test(trimmed);
+    if (!hasEnvelope) return false;
+    // Toleransi caption UI kecil setelah kurung penutup ("Salin", "Unduh", "Copy").
+    return !/\}\s*(?:[A-Za-z]{0,12}\s*)?$/.test(trimmed);
   }
 
   // ── reading the page ──────────────────────────────────────────────────
@@ -74,7 +76,9 @@
   }
 
   function blockText(m) {
-    return m ? (m.textContent || "").trim() : "";
+    // innerText (bukan textContent): mempertahankan line-break hasil render
+    // Markdown — jawaban final tidak lagi jadi satu baris gepeng.
+    return m ? (m.innerText || "").trim() : "";
   }
 
   /** Text of the NEWEST assistant reply (used as the completion signal). */
@@ -90,7 +94,7 @@
     const last = items[items.length - 1];
     return {
       items: items.length,
-      tailLen: last ? (last.textContent || "").length : 0,
+      tailLen: last ? (last.innerText || "").length : 0,
     };
   }
 

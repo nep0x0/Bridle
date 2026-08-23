@@ -69,6 +69,9 @@ export async function main(cliArgs = []) {
   // via the --allow list when given, otherwise interactively in this terminal.
   const approver = allowedTools.length ? listApprover(allowedTools) : blockingConsoleApprover();
 
+// Quiet startup: detailed diagnostics live behind --verbose.
+const vlog = (...a) => { if (verbose) console.log(...a); };
+
   // Construct first, listen later — so the capabilities frame pushed when the
   // adapter connects already lists every registered tool.
   const gw = new WebchatGateway(
@@ -77,7 +80,7 @@ export async function main(cliArgs = []) {
     (m) => console.log("[gateway]", m),
   );
 
-  console.log(`[bridle] starting harness; gateway will listen on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
+  vlog(`[bridle] gateway on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
   const bridle = await createBridle({
     adapter: gw.webchatAdapter(),
     maxSteps: 6,
@@ -93,17 +96,16 @@ export async function main(cliArgs = []) {
   if (robloxFlag) {
     await bridle.ctx.mount(
       robloxPlugin({
-        log: (m) => console.log("[roblox]", m),
+        log: (m) => vlog("[roblox]", m),
         // live transport resolves from config automatically (BRIDLE_STUDIO_MCP
         // or detected vinegar path); without it → deterministic FakeStudio.
       }),
     );
-    console.log("[bridle] roblox domain mounted");
+    vlog("[bridle] roblox domain mounted");
   }
 
   await gw.listen();
-  console.log("[bridle] tools:", bridle.tools.list().map((t) => t.name).join(", "));
-  console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
+    console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
 
   // Wait until a content adapter announces itself (`adapter_ready`), not just
   // until the service worker's socket is up — the socket alone does NOT mean
