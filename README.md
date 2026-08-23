@@ -42,13 +42,33 @@ installable plugin, not the product.
 | `@bridle/headless` | One-call wiring (`createBridle`) + the `bridle` CLI |
 | `extension/` | Browser extension (MV3): web-chat render adapters over the gateway protocol — M3, WIP, see [extension/README.md](./extension/README.md) |
 
-## Quick start (headless)
+## Quick start
+
+**Live REPL — brain = your browser chat tab (no API key):**
+
+```sh
+pnpm build
+node bundles/headless/bin/bridle.mjs webchat --roblox \
+  --allow roblox.execute_luau,roblox.search_game_tree \
+  "Create a red Part named RedBlock at (0,5,0)"
+```
+
+Requires the bridle bridge extension loaded unpacked (`extension/`) and a
+chat.deepseek.com tab open. Type prompts at the `bridle>` prompt; `/help`
+lists slash commands. Prefer bare `bridle` from anywhere?
+
+```sh
+cd bundles/headless && pnpm link --global   # one-time
+bridle webchat --roblox
+```
+
+**One-shot over an OpenAI-compatible API:**
 
 ```sh
 BRIDLE_BASE_URL=https://api.deepseek.com \
 BRIDLE_API_KEY=sk-... \
 BRIDLE_MODEL=deepseek-chat \
-pnpm --filter @bridle/headless exec bridle "What is 12*9? Use the math tool."
+node bundles/headless/bin/bridle.mjs run "What is 12*9? Use the math tool."
 ```
 
 ## License

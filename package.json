@@ -10,7 +10,10 @@
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "bridle": "node bundles/headless/bin/bridle.mjs",
+    "chat": "node bundles/headless/bin/bridle.mjs webchat",
+    "chat:roblox": "node bundles/headless/bin/bridle.mjs webchat --roblox"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
