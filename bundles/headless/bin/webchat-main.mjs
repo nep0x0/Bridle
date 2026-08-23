@@ -5,12 +5,23 @@
  *   real terminal  → Ink TUI  (dist/tui/app.js)
  *   pipes / CI     → plain readline fallback
  *
- * Exported as main(cliArgs); bin/bridle.mjs routes `webchat` here and
- * bin/bridle-webchat.mjs stays as a thin alias.
+ * CONFIG: bridle.config.json (repo root, then ~/.config/bridle/config.json)
+ *   {
+ *     "webchat": { "roblox": true, "allow": ["…"], "verbose": false },
+ *     "roblox":  { "studioMcpPath": "…", "winePrefix": "…" }
+ *   }
+ * With `webchat.roblox: true` (or Studio auto-detected), running is simply:
+ *
+ *   bridle webchat
+ *
+ * CLI flags always override the config. Exported as main(cliArgs).
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import readline from "node:readline";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createBridle } from "../dist/index.js";
 import { commandPlugin, turnProgressPlugin } from "../dist/index.js";
 import {
@@ -19,28 +30,50 @@ import {
 } from "@bridle/gateway-ws";
 import { listApprover } from "@bridle/security";
 import { blockingConsoleApprover } from "@bridle/security/node";
-import { robloxPlugin } from "@bridle/roblox";
+import { robloxPlugin, loadRobloxConfig } from "@bridle/roblox";
 
 export async function main(cliArgs = []) {
+  // ── config file ────────────────────────────────────────────────────────
+  function readWebchatConfig() {
+    const candidates = [
+      join(process.cwd(), "bridle.config.json"),
+      join(homedir(), ".config", "bridle", "config.json"),
+    ];
+    for (const file of candidates) {
+      try {
+        if (!existsSync(file)) continue;
+        const raw = JSON.parse(readFileSync(file, "utf-8"));
+        if (raw && typeof raw.webchat === "object" && raw.webchat) return raw.webchat;
+      } catch {
+        /* unreadable config skipped honestly */
+      }
+    }
+    return {};
+  }
+  const cfg = readWebchatConfig();
+
   // ── CLI flags ──────────────────────────────────────────────────────────
-  // Single left-to-right pass; splice each flag when consumed so indexes
-  // never go stale.
   const argv = [...cliArgs];
-  const allowedTools = [];
-  let robloxFlag = false;
-  const verbose = argv.includes("--verbose");
+  const cliAllow = [];
+  let forceRoblox = false;
+  let noRoblox = false;
+  let verbose = argv.includes("--verbose") || cfg.verbose === true;
   for (let i = 0; i < argv.length; ) {
     if (argv[i] === "--roblox") {
-      robloxFlag = true;
+      forceRoblox = true;
+      argv.splice(i, 1);
+    } else if (argv[i] === "--no-roblox") {
+      noRoblox = true;
       argv.splice(i, 1);
     } else if (argv[i] === "--verbose") {
+      verbose = true;
       argv.splice(i, 1);
     } else if (argv[i] === "--allow") {
       const value = argv[i + 1];
       if (value) {
         for (const s of value.split(",")) {
           const t = s.trim();
-          if (t) allowedTools.push(t);
+          if (t) cliAllow.push(t);
         }
         argv.splice(i, 2);
       } else {
@@ -50,38 +83,50 @@ export async function main(cliArgs = []) {
       i++;
     }
   }
+
+  // ── resolved settings (CLI > config > smart defaults) ──────────────────
+  const rcfg = loadRobloxConfig(() => {}, process.env);
+  const studioDetected = Boolean(rcfg.studioMcpPath);
+  const mountRoblox = noRoblox
+    ? false
+    : forceRoblox || cfg.roblox === true || (cfg.roblox === undefined && studioDetected);
+
+  const allowedTools = [];
+  const pushAllow = (s) => {
+    const t = String(s ?? "").trim();
+    if (t && !allowedTools.includes(t)) allowedTools.push(t);
+  };
+  for (const a of Array.isArray(cfg.allow) ? cfg.allow : []) pushAllow(a);
+  for (const a of cliAllow) pushAllow(a);
   if (allowedTools.length) {
-    for (const builtin of ["echo", "now"]) {
-      if (!allowedTools.includes(builtin)) allowedTools.push(builtin);
-    }
+    for (const builtin of ["echo", "now"]) pushAllow(builtin);
   }
 
   const DEFAULT_PROMPT = "What is 12*9? Use the math tool.";
   const promptArg = argv.join(" ").trim();
   const prompt = promptArg || DEFAULT_PROMPT;
 
-  // Security policy (M4): reads flow; writes/executes ask or follow --allow.
+  // Security policy (M4): reads flow; writes/executes ask or follow allow-list.
   const approver = allowedTools.length
     ? listApprover(allowedTools)
     : blockingConsoleApprover();
 
-  // Quiet startup unless --verbose.
   const vlog = (...a) => {
     if (verbose) console.log(...a);
   };
 
   // ── harness + gateway ──────────────────────────────────────────────────
-  // Construct first, listen later — capabilities frame then advertises all.
-  // Port override untuk sesi kedua (extension default tetap 8642).
-const GATEWAY_PORT = Number(process.env.BRIDLE_GATEWAY_PORT) || EXTENSION_DEFAULT_PORT;
+  const GATEWAY_PORT =
+    Number(process.env.BRIDLE_GATEWAY_PORT) || EXTENSION_DEFAULT_PORT;
 
-const gw = new WebchatGateway(
+  // Construct first, listen later — capabilities frame then advertises all.
+  const gw = new WebchatGateway(
     () => bridle.tools.list(),
     { port: GATEWAY_PORT, renderTimeoutMs: 300_000 },
     (m) => vlog("[gateway]", m),
   );
 
-  console.log(`[bridle] gateway on ws://127.0.0.1:${GATEWAY_PORT}${GATEWAY_PORT === EXTENSION_DEFAULT_PORT ? "" : "  (non-default — extension needs matching config)"}`);
+  console.log(`[bridle] gateway on ws://127.0.0.1:${GATEWAY_PORT}`);
   const bridle = await createBridle({
     adapter: gw.webchatAdapter(),
     maxSteps: 6,
@@ -91,14 +136,8 @@ const gw = new WebchatGateway(
     },
   });
 
-  if (robloxFlag) {
-    await bridle.ctx.mount(
-      robloxPlugin({
-        log: (m) => vlog("[roblox]", m),
-        // live transport resolves from config automatically (vinegar path on
-        // this machine); without config → deterministic FakeStudio.
-      }),
-    );
+  if (mountRoblox) {
+    await bridle.ctx.mount(robloxPlugin({ log: (m) => vlog("[roblox]", m) }));
     console.log("[bridle] roblox domain mounted");
   }
 

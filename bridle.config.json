@@ -1,0 +1,14 @@
+{
+  "webchat": {
+    "roblox": true,
+    "allow": [
+      "roblox.execute_luau",
+      "roblox.search_game_tree",
+      "roblox.multi_edit",
+      "roblox.list_studios",
+      "roblox.get_console_output",
+      "math.eval"
+    ]
+  },
+  "roblox": {}
+}

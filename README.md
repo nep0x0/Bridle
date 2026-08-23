@@ -49,18 +49,17 @@ installable plugin, not the product.
 
 ```sh
 pnpm build
-node bundles/headless/bin/bridle.mjs webchat --roblox \
-  --allow roblox.execute_luau,roblox.search_game_tree \
-  "Create a red Part named RedBlock at (0,5,0)"
+node bundles/headless/bin/bridle.mjs webchat      # itu saja.
 ```
 
-Requires the bridle bridge extension loaded unpacked (`extension/`) and a
-chat.deepseek.com tab open. Type prompts at the `bridle>` prompt; `/help`
+`bridle.config.json` di root sudah menyetel Roblox domain + allow-list
+(StudioMCP terdeteksi otomatis dari vinegar). Tanpa config, gunakan
+`--roblox` / `--allow …`. Type prompts at the `bridle>` prompt; `/help`
 lists slash commands. Prefer bare `bridle` from anywhere?
 
 ```sh
 cd bundles/headless && pnpm link --global   # one-time
-bridle webchat --roblox
+bridle webchat
 ```
 
 **One-shot over an OpenAI-compatible API:**
