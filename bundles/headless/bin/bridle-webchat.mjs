@@ -125,24 +125,61 @@ console.log("[bridle] adapter connected — running turn through the browser …
 process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
 // Register early so Ctrl+C works even while waiting for the adapter.
 
-try {
-  const res = await bridle.run(prompt);
+// ── REPL: one harness, many turns, consistent thread/log ────────────────
+// The site thread already holds earlier turns; the adapter only injects
+// what is NEW since the last assistant message, so back-to-back prompts in
+// one session stay coherent (no duplicate-directive soup).
+
+import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.setPrompt("bride> ");
+rl.prompt(true);
+
+let running = false;
+const queue = [];
+
+async function runTurn(text) {
+  running = true;
   console.log("─".repeat(60));
-  if (res.rejected) {
-    console.error(`rejected: ${res.rejected}`);
-  } else {
-    console.log(`steps: ${res.steps}`);
-    console.log(`final: ${res.text || "(empty response)"}`);
-    console.log("\nsession log:");
-    for (const e of bridle.log.all()) {
-      const p = JSON.stringify(e.payload);
-      console.log(`  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${p.slice(0, 100)}`);
+  try {
+    const res = await bridle.run(text);
+    if (res.rejected) {
+      console.error(`rejected: ${res.rejected}`);
+    } else {
+      console.log(`steps: ${res.steps}`);
+      console.log(`final: ${res.text || "(empty response)"}`);
     }
+  } catch (err) {
+    console.error("[bridle] turn failed honestly:", err?.message ?? err);
   }
-} catch (err) {
-  console.error("[bridle] turn failed honestly:", err?.message ?? err);
+  running = false;
+  if (queue.length) runTurn(queue.shift());
+  else rl.prompt(true);
 }
 
-// Keep the gateway up so the tab's adapter stays attached for another try
-// (a closed gateway sends the service worker into suspend/retry cycling).
-console.log("\n[bridle] gateway stays up — Ctrl+C to exit.");
+rl.on("line", (line) => {
+  const text = line.trim();
+  if (!text) return;
+  if (/^(exit|quit|keluar)$/i.test(text)) {
+    gw.close().finally(() => process.exit(0));
+    return;
+  }
+  if (running) {
+    queue.push(text);
+    console.log("[bridle] queued — turn in progress");
+    return;
+  }
+  runTurn(text);
+});
+
+console.log(
+  "\n[bridle] REPL ready — type a prompt and Enter. 'exit' to quit.\n" +
+    "[bridle] same harness + same log for every turn; the chat thread stays coherent.",
+);
+
+// One-shot callers (`bridle-webchat.mjs "do X"`) land their task as the
+// FIRST REPL turn instead of a separate fire-once path.
+if (prompt) runTurn(prompt);
+
+
