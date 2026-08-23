@@ -32,9 +32,12 @@ import { robloxPlugin } from "@bridle/roblox";
 const argv = process.argv.slice(2);
 const allowedTools = [];
 let robloxFlag = false;
+const verbose = argv.includes("--verbose");
 for (let i = 0; i < argv.length; ) {
   if (argv[i] === "--roblox") {
     robloxFlag = true;
+    argv.splice(i, 1);
+  } else if (argv[i] === "--verbose") {
     argv.splice(i, 1);
   } else if (argv[i] === "--allow") {
     const value = argv[i + 1];
@@ -102,8 +105,11 @@ console.log("[bridle] waiting for a chat tab to attach (load the extension, then
 // Wait until a content adapter announces itself (`adapter_ready`), not just
 // until the service worker's socket is up — the socket alone does NOT mean
 // any chat tab is wired. Bail after 90s with an honest message.
+// BRIDLE_SKIP_ADAPTER_WAIT=1 skips the gate (offline tinkering: slash
+// commands work; turns will fail honestly until a tab attaches).
+const skipWait = process.env.BRIDLE_SKIP_ADAPTER_WAIT === "1";
 const adapterDeadline = Date.now() + 90_000;
-while (!gw.hasReadyAdapter()) {
+while (!skipWait && !gw.hasReadyAdapter()) {
   if (Date.now() > adapterDeadline) {
     console.error(
       "[bridle] no chat tab attached within 90s. Checklist:\n" +
@@ -129,11 +135,19 @@ process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
 // The site thread already holds earlier turns; the adapter only injects
 // what is NEW since the last assistant message, so back-to-back prompts in
 // one session stay coherent (no duplicate-directive soup).
+//
+// Plugin-first: progress lines come from turnProgressPlugin, slash commands
+// from the command registry service — this runner only wires readline.
 
 import readline from "node:readline";
+import { commandPlugin, turnProgressPlugin } from "../dist/index.js";
+
+await bridle.ctx.mount(turnProgressPlugin({ log: (l) => console.log(l) }));
+await bridle.ctx.mount(commandPlugin());
+const commands = bridle.ctx.requireService("commands");
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.setPrompt("bride> ");
+rl.setPrompt("bridle> ");
 rl.prompt(true);
 
 let running = false;
@@ -149,6 +163,13 @@ async function runTurn(text) {
     } else {
       console.log(`steps: ${res.steps}`);
       console.log(`final: ${res.text || "(empty response)"}`);
+      if (verbose) {
+        for (const e of bridle.log.all()) {
+          console.log(
+            `  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${JSON.stringify(e.payload).slice(0, 110)}`,
+          );
+        }
+      }
     }
   } catch (err) {
     console.error("[bridle] turn failed honestly:", err?.message ?? err);
@@ -160,9 +181,19 @@ async function runTurn(text) {
 
 rl.on("line", (line) => {
   const text = line.trim();
-  if (!text) return;
+  if (!text) {
+    rl.prompt(true);
+    return;
+  }
   if (/^(exit|quit|keluar)$/i.test(text)) {
     gw.close().finally(() => process.exit(0));
+    return;
+  }
+  // Slash → command registry service; everything else → a harness turn.
+  if (text.startsWith("/")) {
+    commands
+      .dispatch(text, { log: (...p) => console.log(...p) })
+      .finally(() => rl.prompt(true));
     return;
   }
   if (running) {
@@ -174,7 +205,7 @@ rl.on("line", (line) => {
 });
 
 console.log(
-  "\n[bridle] REPL ready — type a prompt and Enter. 'exit' to quit.\n" +
+  "\n[bridle] REPL ready — type a prompt and Enter. /help for commands. 'exit' to quit.\n" +
     "[bridle] same harness + same log for every turn; the chat thread stays coherent.",
 );
 

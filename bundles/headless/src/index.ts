@@ -22,6 +22,11 @@ import {
   workflowPlugin,
   type WorkflowOptions,
 } from "@bridle/workflow";
+import { commandPlugin, type Command, type CommandIO, type CommandsApi } from "./commands.ts";
+import { turnProgressPlugin, formatProgress, type ProgressOptions } from "./progress.ts";
+
+export { commandPlugin, turnProgressPlugin, formatProgress };
+export type { Command, CommandIO, CommandsApi, ProgressOptions };
 
 export interface BridleOptions {
   /** API-model configuration (OpenAI-compatible endpoint). */
