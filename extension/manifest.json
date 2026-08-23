@@ -12,7 +12,7 @@
   "host_permissions": ["ws://127.0.0.1/*", "ws://localhost/*"],
   "content_scripts": [
     {
-      "matches": ["https://chat.deepseek.com/*"],
+      "matches": ["https://chat.deepseek.com/*", "https://deepseek.com/*"],
       "js": ["content/bridle-wire.js", "content/deepseek.js"],
       "run_at": "document_idle"
     }

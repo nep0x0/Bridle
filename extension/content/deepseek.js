@@ -363,6 +363,14 @@
   // ── one render ────────────────────────────────────────────────────────
 
   async function render(messages, tools) {
+    // Guard against wrong-tab renders (seen live: a stray tab on another
+    // DeepSeek host grabbed the port and hung the harness). Fail fast and
+    // honestly instead of stalling 175s.
+    if (!/(^|\.)chat\.deepseek\.com$/.test(location.hostname)) {
+      throw new Error(
+        `this tab (${location.host}) is not a supported chat surface — open chat.deepseek.com`,
+      );
+    }
     const outgoing = composeOutgoing(messages, tools);
     const startedAt = Date.now();
     const deadline = startedAt + TIMINGS.overallMs; // shared by both phases

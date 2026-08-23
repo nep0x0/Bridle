@@ -44,18 +44,36 @@ let nextId = 1;
 const status = { gateway: false, tools: null, adapters: 0 };
 
 function broadcastStatus() {
-  status.adapters = adapterPorts.size;
-  for (const p of adapterPorts) {
+  status.adapters = adapterPorts.length;
+  for (const { port } of adapterPorts) {
     try {
-      p.postMessage({ type: "status", ...status });
+      port.postMessage({ type: "status", ...status });
     } catch { /* port closing */ }
   }
 }
 
 /** @type {Map<string, {resolve: Function, timer: any}>} */
 const pendingRenders = new Map();
-/** @type {Set<chrome.runtime.Port>} */
-const adapterPorts = new Set();
+/** @type {Array<{port: chrome.runtime.Port, url: string}>} */
+const adapterPorts = [];
+
+// Providers migrate domains mid-session (seen live: chat.deepseek.com ->
+// deepseek.com/en). Prefer a KNOWN chat surface over a stray tab; else the
+// newest attachment. Logged so wrong-tab picks are never mysterious.
+function hostOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function pickAdapterPort() {
+  const chatLike = adapterPorts.filter(
+    (p) => /(^|\.)chat\./i.test(hostOf(p.url)) || p.url.includes("/chat"),
+  );
+  return chatLike.at(-1) ?? adapterPorts.at(-1);
+}
 
 function log(...a) {
   console.log("[bridle-bg]", ...a);
@@ -87,8 +105,8 @@ function connect() {
     log("gateway connected at", DEFAULT_URL);
     startHeartbeat();
     // Re-announce any content adapters that attached while we were offline.
-    for (const p of adapterPorts) {
-      sendFrame({ type: "adapter_ready", url: p.sender?.tab?.url });
+    for (const { port } of adapterPorts) {
+      sendFrame({ type: "adapter_ready", url: port.sender?.tab?.url });
     }
     broadcastStatus();
   };
@@ -165,15 +183,10 @@ function failAllPending(reason) {
 
 // ── render_request fan-out to a content adapter ────────────────────────
 
-function firstOpenPort() {
-  for (const p of adapterPorts) return p;
-  return undefined;
-}
-
 function handleRenderRequest(msg) {
   const { id } = msg;
-  const port = firstOpenPort();
-  if (!port) {
+  const chosen = pickAdapterPort();
+  if (!chosen) {
     sendResult(id, {
       ok: false,
       text: "",
@@ -182,6 +195,8 @@ function handleRenderRequest(msg) {
     });
     return;
   }
+  const port = chosen.port;
+  log(`render #${id} -> ${chosen.url || "(unknown tab)"}`);
   const entry = {
     resolve: (fields) => {
       pendingRenders.delete(id);
@@ -216,20 +231,21 @@ function handleRenderRequest(msg) {
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "bridle-adapter") return;
-  adapterPorts.add(port);
-  log("content adapter attached");
+  const url = port.sender?.tab?.url ?? "";
+  adapterPorts.push({ port, url });
+  log(`content adapter attached: ${url}`);
   // Announce readiness upstream: a bare socket is NOT enough for the runner
   // to know a chat tab is actually wired up.
-  const url = port.sender?.tab?.url;
   if (!sendFrame({ type: "adapter_ready", url })) {
     log("adapter attached while gateway socket down — will re-announce on reconnect");
   }
   // Give the fresh port the current status immediately (status bar MVP).
   try {
-    port.postMessage({ type: "status", ...status, adapters: adapterPorts.size });
+    port.postMessage({ type: "status", ...status, adapters: adapterPorts.length });
   } catch { /* never mind */ }
   port.onDisconnect.addListener(() => {
-    adapterPorts.delete(port);
+    const i = adapterPorts.findIndex((e) => e.port === port);
+    if (i >= 0) adapterPorts.splice(i, 1);
     log("content adapter detached");
     // Its in-flight renders can never answer now.
     failAllPending("chat tab closed mid-render");
