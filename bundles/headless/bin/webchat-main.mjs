@@ -167,7 +167,39 @@ export async function main(cliArgs = []) {
     console.log(`[bridle] adapter ready: ${gw.readyAdapter.url}`);
   }
 
-  process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
+  // ── studio warmup: proxy butuh beberapa detik untuk mendaftar ke Studio ─
+  // Tanpa ini, tool call pertama model gagal "no Studio instance connected".
+  let studioName = null;
+  let robloxTransport = null;
+  if (mountRoblox) {
+    try {
+      robloxTransport = bridle.ctx.requireService("roblox").transport;
+    } catch { /* tidak fatal */ }
+    console.log("[bridle] menunggu Studio mendaftar ke MCP proxy …");
+    const dl = Date.now() + 30_000;
+    for (;;) {
+      const r = await bridle.tools.execute("roblox.list_studios", {});
+      if (r.ok) {
+        const firstLine = r.text.split("\n")[0] ?? "";
+        studioName = firstLine.replace(/^\d+\.\s*/, "");
+        console.log(`[bridle] studio siap: ${studioName}`);
+        break;
+      }
+      if (Date.now() > dl) {
+        console.log("[bridle] Studio belum terdaftar dalam 30s — tool roblox akan gagal jujur sampai terdaftar");
+        break;
+      }
+      await new Promise((r2) => setTimeout(r2, 2000));
+    }
+  }
+
+  const cleanupAll = () => {
+    try { robloxTransport?.close?.(); } catch {}
+  };
+  process.on("exit", cleanupAll);
+  const _sigint = process.listeners("SIGINT").at(-1);
+  if (_sigint) { process.removeListener("SIGINT", _sigint); }
+  process.on("SIGINT", () => { cleanupAll(); gw.close().finally(() => process.exit(130)); });
 
   // ── shared interactive plumbing (both surfaces are plugin-first) ───────
   const sinkRef = { current: () => {} };
@@ -189,7 +221,8 @@ export async function main(cliArgs = []) {
       initialPrompt: promptArg || undefined,
       verbose,
       sinkRef,
-      onClose: () => {},
+      header: { tools: bridle.tools.list().length, studio: studioName },
+      onClose: () => { cleanupAll(); },
     });
     await gw.close().catch(() => {});
     return;

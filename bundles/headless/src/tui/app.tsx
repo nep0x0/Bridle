@@ -26,6 +26,11 @@ export interface SinkRef {
   current: (kind: EntryKind, text: string) => void;
 }
 
+export interface TuiHeader {
+  tools: number;
+  studio?: string | null;
+}
+
 export interface TuiOptions {
   bridle: any; // Bridle instance (kept loose: presentation only)
   commands: import("@bridle/kernel").ServiceMap["commands"];
@@ -33,10 +38,24 @@ export interface TuiOptions {
   verbose: boolean;
   /** Mutable sink the caller wires into turnProgressPlugin. */
   sinkRef: SinkRef;
+  header?: TuiHeader;
   onClose(): void;
 }
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function deco(entry: Entry): { prefix: string; color?: string } {
+  if (entry.kind === "you") return { prefix: "❯ ", color: "cyan" };
+  if (entry.kind === "ok") return { prefix: "✓ ", color: "green" };
+  if (entry.kind === "err") return { prefix: "✗ ", color: "red" };
+  if (entry.kind === "sys") return { prefix: "◆ ", color: "magenta" };
+  if (/^→ tool /.test(entry.text)) return { prefix: "", color: "gray" };
+  if (/^result /.test(entry.text))
+    return entry.text.startsWith("result ok")
+      ? { prefix: "", color: "green" }
+      : { prefix: "", color: "red" };
+  return { prefix: "", color: undefined };
+}
 
 function colorFor(kind: EntryKind): string | undefined {
   switch (kind) {
@@ -69,7 +88,7 @@ export function runTuiRepl(opts: TuiOptions): Promise<void> {
 }
 
 function ReplApp(props: TuiOptions & { onDone(): void }) {
-  const { bridle, commands, verbose, sinkRef, onDone } = props;
+  const { bridle, commands, verbose, sinkRef, header, onDone } = props;
   const app = useApp();
 
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -77,13 +96,18 @@ function ReplApp(props: TuiOptions & { onDone(): void }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [caption, setCaption] = useState("");
   const queueRef = useRef<string[]>([]);
   const runningRef = useRef(false);
 
   // Expose push() to imperative callers (progress sink, runTurn, …).
   const push = (kind: EntryKind, text: string) =>
     setEntries((prev) => [...prev, { id: ++idRef.current, kind, text }]);
-  sinkRef.current = (kind, text) => push(kind, text);
+  sinkRef.current = (kind, text) => {
+    if (busy) setCaption(text.replace(/^[→✓✗·■]+\s*/, ""));
+    push(kind, text);
+  };
 
   // Capture stray console output so nothing corrupts the frame.
   useEffect(() => {
@@ -102,7 +126,12 @@ function ReplApp(props: TuiOptions & { onDone(): void }) {
   // Spinner frames only while a turn is running.
   useEffect(() => {
     if (!busy) return;
-    const iv = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 80);
+    const startedAt = Date.now();
+    setElapsed(0);
+    const iv = setInterval(() => {
+      setFrame((f) => (f + 1) % FRAMES.length);
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 100);
     return () => clearInterval(iv);
   }, [busy]);
 
@@ -187,30 +216,57 @@ function ReplApp(props: TuiOptions & { onDone(): void }) {
   return (
     <Box flexDirection="column">
       <Static items={entries}>
-        {(entry) => (
-          <Box key={entry.id} paddingLeft={1} paddingRight={1}>
-            <Text color={colorFor(entry.kind)} wrap="end">
-              {PREFIX[entry.kind]}
-              {entry.text}
-            </Text>
-          </Box>
-        )}
+        {(entry) => {
+          const d = deco(entry);
+          const legacyPrefix = PREFIX[entry.kind];
+          return (
+            <Box key={entry.id} paddingLeft={1} paddingRight={1}>
+              <Text color={d.color} wrap="end">
+                {(d.prefix || legacyPrefix) + entry.text}
+              </Text>
+            </Box>
+          );
+        }}
       </Static>
 
-      <Box borderStyle="round" borderColor="#4a5a8a" paddingX={1}>
-        <Box marginRight={1}>
-          <Text color={busy ? "yellow" : "green"}>
-            {busy ? `${FRAMES[frame]} ` : "❯ "}
+      <Box
+        borderStyle="round"
+        borderColor={busy ? "#8a7a3a" : "#4a5a8a"}
+        paddingX={1}
+        flexDirection="column"
+      >
+        {/* header status — selalu terlihat, menempel di kotak input */}
+        <Box justifyContent="space-between" marginBottom={0}>
+          <Text bold color="#7aa2ff">
+            BRIDLE
+          </Text>
+          <Text dimColor>
+            {header?.tools ?? 0} tools
+            {header?.studio ? ` · studio: ${header.studio}` : ""}
           </Text>
         </Box>
-        {value ? (
-          <Text>{value}</Text>
-        ) : (
-          <Text dimColor>ketik prompt… (/help untuk perintah)</Text>
-        )}
-        {busy && (
-          <Text dimColor>{"  (turn berjalan — input otomatis mengantre)"}</Text>
-        )}
+        <Box>
+          <Box marginRight={1}>
+            <Text color={busy ? "yellow" : "green"}>
+              {busy ? `${FRAMES[frame]} ` : "❯ "}
+            </Text>
+          </Box>
+          {value ? (
+            <Text>{value}</Text>
+          ) : busy ? (
+            <Text dimColor>{caption || "menunggu balasan model…"}</Text>
+          ) : (
+            <Text dimColor>ketik prompt… (/help untuk perintah)</Text>
+          )}
+        </Box>
+        <Box justifyContent="space-between" marginTop={0}>
+          <Text dimColor>/help · ctrl+c keluar</Text>
+          {busy && (
+            <Text color="yellow">
+              {elapsed}s · input otomatis mengantre
+            </Text>
+          )}
+        </Box>
       </Box>
     </Box>
   );
