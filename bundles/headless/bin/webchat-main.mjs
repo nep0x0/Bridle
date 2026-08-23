@@ -135,83 +135,85 @@ const vlog = (...a) => { if (verbose) console.log(...a); };
   process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
   // Register early so Ctrl+C works even while waiting for the adapter.
 
-  // ── REPL: one harness, many turns, consistent thread/log ────────────────
-  // The site thread already holds earlier turns; the adapter only injects
-  // what is NEW since the last assistant message, so back-to-back prompts in
-  // one session stay coherent (no duplicate-directive soup).
-  //
-  // Plugin-first: progress lines come from turnProgressPlugin, slash commands
-  // from the command registry service — this runner only wires readline.
+  // ── interactive surface: Ink TUI on a real terminal, readline fallback ──
+await bridle.ctx.mount(commandPlugin());
+const commands = bridle.ctx.requireService("commands");
 
-  await bridle.ctx.mount(turnProgressPlugin({ log: (l) => console.log(l) }));
-  await bridle.ctx.mount(commandPlugin());
-  const commands = bridle.ctx.requireService("commands");
+const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+if (isTty) {
+  const { runTuiRepl } = await import("./tui/app.js");
+  await runTuiRepl({
+    bridle,
+    commands,
+    initialPrompt: promptArg,
+    verbose,
+    sinkRef,
+    onClose: () => {},
+  });
+  await gw.close().catch(() => {});
+  return;
+}
 
-  const rl = readline.createInterface({ input: process.stdin, terminal: false });
-  rl.setPrompt("bridle> ");
-  rl.prompt(true);
+// ── legacy readline fallback (pipes / CI / --no-tty environments) ───────
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.setPrompt("bridle> ");
+rl.prompt(true);
 
-  let running = false;
-  const queue = [];
+let running = false;
+const queue = [];
 
-  async function runTurn(text) {
-    running = true;
-    console.log("─".repeat(60));
-    try {
-      const res = await bridle.run(text);
-      if (res.rejected) {
-        console.error(`rejected: ${res.rejected}`);
-      } else {
-        console.log(`steps: ${res.steps}`);
-        console.log(`final: ${res.text || "(empty response)"}`);
-        if (verbose) {
-          for (const e of bridle.log.all()) {
-            console.log(
-              `  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${JSON.stringify(e.payload).slice(0, 110)}`,
-            );
-          }
+async function runTurn(text) {
+  running = true;
+  console.log("─".repeat(60));
+  try {
+    const res = await bridle.run(text);
+    if (res.rejected) {
+      console.error(`rejected: ${res.rejected}`);
+    } else {
+      console.log(`steps: ${res.steps}`);
+      console.log(`final: ${res.text || "(empty response)"}`);
+      if (verbose) {
+        for (const e of bridle.log.all()) {
+          console.log(
+            `  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${JSON.stringify(e.payload).slice(0, 110)}`,
+          );
         }
       }
-    } catch (err) {
-      console.error("[bridle] turn failed honestly:", err?.message ?? err);
     }
-    running = false;
-    if (queue.length) runTurn(queue.shift());
-    else rl.prompt(true);
+  } catch (err) {
+    console.error("[bridle] turn failed honestly:", err?.message ?? err);
   }
+  running = false;
+  if (queue.length) runTurn(queue.shift());
+  else rl.prompt(true);
+}
 
-  rl.on("line", (line) => {
-    const text = line.trim();
-    if (!text) {
-      rl.prompt(true);
-      return;
-    }
-    if (/^(exit|quit|keluar)$/i.test(text)) {
-      gw.close().finally(() => process.exit(0));
-      return;
-    }
-    // Slash → command registry service; everything else → a harness turn.
-    if (text.startsWith("/")) {
-      commands
-        .dispatch(text, { log: (...p) => console.log(...p) })
-        .finally(() => rl.prompt(true));
-      return;
-    }
-    if (running) {
-      queue.push(text);
-      console.log("[bridle] queued — turn in progress");
-      return;
-    }
-    runTurn(text);
-  });
+rl.on("line", (line) => {
+  const text = line.trim();
+  if (!text) {
+    rl.prompt(true);
+    return;
+  }
+  if (/^(exit|quit|keluar)$/i.test(text)) {
+    gw.close().finally(() => process.exit(0));
+    return;
+  }
+  if (text.startsWith("/")) {
+    commands
+      .dispatch(text, { log: (...p) => console.log(...p) })
+      .finally(() => rl.prompt(true));
+    return;
+  }
+  if (running) {
+    queue.push(text);
+    console.log("[bridle] queued — turn in progress");
+    return;
+  }
+  runTurn(text);
+});
 
-  console.log(
-    "\n[bridle] REPL ready — type a prompt and Enter. /help for commands. 'exit' to quit.\n" +
-      "[bridle] same harness + same log for every turn; the chat thread stays coherent.",
-  );
-
-  // One-shot callers land their task as the FIRST REPL turn instead of a
-  // separate fire-once path. Without an explicit prompt the REPL simply
-  // waits for your first line.
-  if (promptArg) runTurn(prompt);
+console.log(
+  "\n[bridle] REPL (readline fallback) ready — /help for commands. 'exit' to quit.",
+);
+if (promptArg) runTurn(promptArg);
 }
