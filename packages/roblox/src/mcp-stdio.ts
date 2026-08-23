@@ -57,6 +57,8 @@ type Pending = {
 export class McpStdioTransport implements StudioTransport {
   readonly kind = "live" as const;
 
+  #spawnOpts: McpStdioOptions;
+
   #proc: ChildProcess;
   #buffer = "";
   #nextId = 1;
@@ -70,6 +72,7 @@ export class McpStdioTransport implements StudioTransport {
   #exited = false;
 
   private constructor(opts: McpStdioOptions) {
+    this.#spawnOpts = { ...opts };
     this.#opts = {
       requestTimeoutMs: opts.requestTimeoutMs ?? 30_000,
       toolsReadyTimeoutMs: opts.toolsReadyTimeoutMs ?? 15_000,
@@ -120,6 +123,20 @@ export class McpStdioTransport implements StudioTransport {
   /** Tool names advertised by the server (diagnostics/tests). */
   advertisedTools(): string[] {
     return [...this.#toolNames];
+  }
+
+  /** Last stderr lines from the proxy — diagnostics when upstream dies. */
+  stderrTail(lines = 4): string[] {
+    return this.#stderrTail.slice(-lines);
+  }
+
+  /** Kill the current child and start a FRESH proxy (same options),
+   *  re-running handshake + tools wait. Returns this instance replaced
+   *  semantics: caller should reassign if it holds the reference. */
+  async respawn(): Promise<McpStdioTransport> {
+    this.close();
+    await new Promise((r) => setTimeout(r, 1500));
+    return McpStdioTransport.connect({ ...this.#spawnOpts });
   }
 
   close(): void {

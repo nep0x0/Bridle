@@ -98,206 +98,67 @@
     };
   }
 
-  /** Wait until a NEW answer block exists. Reasoning-tolerant: page progress
-   *  (item growth) keeps resetting the give-up timer; only a page that is
-   *  both quiet AND answerless for progressIdleMs fails early. */
-  async function waitForNewReply(baselineCount, deadline) {
+  /** Tunggu balasan selesai — sadar-fase, ala mekanisme ZS:
+   *  FASE REASONING : kontainer think tumbuh → dianggap hidup, tanpa tekanan.
+   *  FASE JAWABAN   : markdown non-think baru muncul → selesai bila teks
+   *                   tak berubah idleMs DAN tidak ada indikator generate.
+   *  Halaman diam total ≥ progressIdleMs tanpa jawaban ⇒ gagal jujur. */
+  async function waitForReply(baselineAnswerText, deadline) {
     const startedAt = Date.now();
     let sig = activitySignature();
     let lastProgressAt = startedAt;
-    let announced = false;
-    while (markdownBlocks().length <= baselineCount) {
+    let announcedReasoning = false;
+    let prevAnswer = "";
+    let stableSince = 0;
+
+    const answerNow = () => {
+      const blocks = markdownBlocks();
+      return blocks.length ? blockText(blocks[blocks.length - 1]) : "";
+    };
+
+    for (;;) {
       if (Date.now() > deadline) {
         throw new Error(
-          `no answer block within ${Math.round(TIMINGS.warmupMs / 1000)}s — ` +
-            `the model may still be reasoning (try again or use a fresh chat); ` +
-            `last page activity ${new Date(lastProgressAt).toISOString().slice(11, 19)}`,
+          `reply not settled within ${Math.round(TIMINGS.warmupMs / 1000)}s ` +
+            `(model bisa masih reasoning — coba lagi / chat baru); ` +
+            `aktivitas terakhir ${new Date(lastProgressAt).toISOString().slice(11, 19)}`,
         );
       }
+      await sleep(TIMINGS.pollMs);
+
+      const answer = answerNow();
       const cur = activitySignature();
+
+      // ── fase jawaban ──────────────────────────────────────────────────
+      if (answer) {
+        if (answer !== prevAnswer || looksTruncated(answer)) {
+          prevAnswer = answer;
+          stableSince = Date.now(); // masih mengalir — reset jendela stabil
+        } else if (
+          stableSince &&
+          Date.now() - stableSince >= TIMINGS.idleMs &&
+          !generatingVisible()
+        ) {
+          return prev; // selesai
+        }
+        if (!prevAnswer) prevAnswer = answer;
+        continue;
+      }
+
+      // ── fase reasoning / belum ada jawaban ────────────────────────────
       if (cur.items !== sig.items || cur.tailLen !== sig.tailLen) {
         lastProgressAt = Date.now();
-        if (!announced && cur.tailLen > 0) {
-          announced = true;
-          console.info("[bridle] model is generating (possibly reasoning) …");
+        if (!announcedReasoning && cur.tailLen > 0) {
+          announcedReasoning = true;
+          console.info("[bridle] model sedang menulis (reasoning?) …");
         }
       }
       sig = cur;
       if (Date.now() - lastProgressAt > TIMINGS.progressIdleMs) {
         throw new Error(
-          `page went quiet for ${Math.round(TIMINGS.progressIdleMs / 1000)}s without an answer block`,
+          `halaman diam ${Math.round(TIMINGS.progressIdleMs / 1000)}s tanpa jawaban`,
         );
       }
-      await sleep(TIMINGS.pollMs);
-    }
-  }
-
-  /** Heuristic "still generating" probe, multi-signal:
-   *    - .ds-loading overlay present
-   *    - primary button carries a stop-ish glyph (rect shape / M2-path) or a
-   *      stop-labelled aria/title (locale-tolerant)
-   *  Combined with the stability window + truncation guard so ANY single
-   *  selector miss degrades to slower-but-correct, never wrong. */
-  function generatingVisible() {
-    if (document.querySelector(SEL.generating)) return true;
-    const btn = document.querySelector(SEL.sendBtn);
-    if (!btn) return false;
-    const label = `${btn.getAttribute("aria-label") ?? ""} ${btn.getAttribute("title") ?? ""}`.toLowerCase();
-    if (/stop|berhenti|停止/.test(label)) return true;
-    const shape = btn.querySelector("svg rect, svg path");
-    const d = shape?.getAttribute("d") || "";
-    return Boolean(btn.querySelector("svg rect") || d.startsWith("M2"));
-  }
-
-  // ── status bar (in-flow above the composer, ZS-style placement) ───────
-  //
-  // Placement strategy adopted from ZeroScript's core/main.js placeBar():
-  // find the lowest ancestor of the textarea that CONTAINS the send button
-  // but NOT the model-mode tabs — that is the rounded input box itself — and
-  // live there as its first child (full width, reflows cleanly). A periodic
-  // anchoring pass self-heals after SPA re-renders.
-
-  const BAR_ID = "bridle-status-bar";
-
-  // LATCHED mount (ZS does the same for its Vision selection): once a
-  // conversation starts, DeepSeek REMOVES the mode radiogroup from the DOM,
-  // so the "no tabs" constraint vanishes and a fresh climb would land in a
-  // tiny button row — squashing the bar. Latch the first good box and reuse
-  // it while it stays connected and still contains the editor.
-  let latchedParent = null; // Element | null
-
-  /** Lowest textarea ancestor holding the send button but no mode tabs. */
-  function barMount() {
-    let ta;
-    try {
-      ta = getEditor();
-    } catch {
-      return null;
-    }
-    if (!ta) return null;
-
-    if (
-      latchedParent &&
-      latchedParent.isConnected &&
-      latchedParent.contains(ta)
-    ) {
-      let before = latchedParent.firstElementChild;
-      if (before && before.id === BAR_ID) before = before.nextElementSibling;
-      return { parent: latchedParent, before };
-    }
-
-    const send = document.querySelector(SEL.sendBtn);
-    const group = document.querySelector('[role="radiogroup"]');
-    let box = ta.parentElement;
-    while (box && box !== document.body) {
-      const holdsSend = !send || box.contains(send);
-      const holdsTabs = group && box.contains(group);
-      if (holdsSend && !holdsTabs) break;
-      box = box.parentElement;
-    }
-    if (!box || box === document.body) box = ta.parentElement;
-    if (!box) return null;
-    latchedParent = box; // latch
-    let before = box.firstElementChild;
-    if (before && before.id === BAR_ID) before = before.nextElementSibling;
-    return { parent: box, before };
-  }
-
-  /** Cached last-known status. The anchoring pass repaints from THIS every
-   *  tick, because React re-renders can wipe our node at any moment — and a
-   *  freshly re-created bar must never sit empty waiting for an event that
-   *  may never fire again (the exact bug this replaces). */
-  let lastStatus = { gateway: false, tools: null, adapters: 0 };
-
-  function paintStatus(bar, s) {
-    const dot = (on) =>
-      `<span style="width:8px;height:8px;border-radius:50%;background:${on ? "#38d17c" : "#5a6478"};display:inline-block"></span>`;
-    const tools =
-      typeof s.tools === "number" && s.tools > 0 ? `${s.tools} tools` : "no tools";
-    bar.innerHTML =
-      `<span style="letter-spacing:.4px">BRIDLE</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(s.gateway)} gateway</span>` +
-      `<span>${tools}</span>` +
-      `<span style="display:flex;gap:4px;align-items:center">${dot(s.adapters > 0)} chat tab</span>`;
-    bar.dataset.sig = `${s.gateway}|${s.tools}|${s.adapters}`;
-  }
-
-  /** One anchoring pass: create if missing/wiped, re-home if re-rendered
-   *  away, then ALWAYS repaint from the cache (cheap; signature-guarded). */
-  function placeStatus() {
-    const mount = barMount();
-    if (!mount) return;
-    let bar = document.getElementById(BAR_ID);
-    const sig = `${lastStatus.gateway}|${lastStatus.tools}|${lastStatus.adapters}`;
-    if (!bar || !bar.isConnected) {
-      bar = document.createElement("div");
-      bar.id = BAR_ID;
-      bar.style.cssText = [
-        "width:100%", "box-sizing:border-box",
-        "flex-shrink:0", "min-height:26px",
-        "margin:0 0 6px 0",
-        "display:flex", "gap:10px", "align-items:center",
-        "padding:4px 14px 8px",
-        "background:transparent", "border:none",
-        "border-bottom:1px solid #ffffff14", "border-radius:0",
-        "color:#d7e3ff", "font:600 12px/1.4 system-ui,sans-serif",
-        "pointer-events:none", "white-space:nowrap",
-      ].join(";");
-      mount.parent.insertBefore(bar, mount.before ?? null);
-    } else if (bar.parentElement !== mount.parent) {
-      try {
-        mount.parent.insertBefore(bar, mount.before ?? null);
-      } catch { /* transient SPA churn */ }
-    }
-    if (bar.dataset.sig !== sig || !bar.childNodes.length) {
-      paintStatus(bar, lastStatus);
-    }
-  }
-
-  function renderStatus(s) {
-    lastStatus = s;
-    placeStatus();
-  }
-
-  // ── composer mode: pick Expert/"Pakar" so the brain actually thinks ────
-  //
-  // DeepSeek V4 model radios carry data-model-type ("default"=Instant,
-  // "expert", "vision"); older builds used a separate DeepThink toggle.
-  // Radios DISAPPEAR once a conversation starts — this runs before every
-  // send, silently doing nothing when they are already gone.
-
-  const nodeText = (n) => ((n && (n.innerText || n.textContent)) || "").trim();
-
-  function ensureDeepThinking() {
-    const group = document.querySelector('[role="radiogroup"]');
-    const radios = group
-      ? [...group.querySelectorAll('[role="radio"]')]
-      : [...document.querySelectorAll('[role="radio"]')];
-    const expert =
-      radios.find((r) => r.getAttribute("data-model-type") === "expert") ||
-      radios.find((r) => /pakar|expert|专家|专业/i.test(nodeText(r)));
-    if (expert) {
-      if (expert.getAttribute("aria-checked") !== "true") {
-        try {
-          expert.click();
-          console.info("[bridle] composer mode -> expert");
-        } catch { /* best effort */ }
-      }
-      return;
-    }
-    // Legacy fallback: a separate DeepThink toggle.
-    const tg = [...document.querySelectorAll(".ds-toggle-button")].find((t) =>
-      /deep\s*think|deepthink|pikir/i.test(nodeText(t)),
-    );
-    const off =
-      tg &&
-      (tg.getAttribute("aria-pressed") === "false" ||
-        !tg.classList.contains("ds-toggle-button--selected"));
-    if (tg && off) {
-      try {
-        tg.click();
-        console.info("[bridle] legacy DeepThink toggled ON");
-      } catch { /* best effort */ }
     }
   }
 
@@ -386,29 +247,14 @@
     await sleep(50); // let React settle before clicking
     clickSend();
 
-    await waitForNewReply(baselineCount, deadline);
+    await waitForReply(baselineCount, deadline);
+    const raw = newestReplyText();
+    if (!raw) throw new Error("balasan kosong saat deadline");
+    console.info(
+      `[bridle] reply captured (${raw.length} chars): ${raw.slice(0, 120).replace(/\n/g, " ")}`,
+    );
+    const parsed = Wire.parseToolCalls(raw);
 
-    let prev = "";
-    let stableSince = 0;
-    while (Date.now() < deadline) {
-      await sleep(TIMINGS.pollMs);
-      const t = newestReplyText();
-      if (t && t === prev && !looksTruncated(t)) {
-        if (!stableSince) stableSince = Date.now();
-        if (Date.now() - stableSince >= TIMINGS.idleMs && !generatingVisible()) break;
-        // looksTruncated ⇒ deliberately fall through: still streaming.
-      } else {
-        prev = t;
-        stableSince = 0;
-      }
-    }
-    if (!prev) throw new Error("reply stayed empty until the deadline");
-    if (looksTruncated(prev)) {
-      console.warn("[bridle] deadline hit while the tool envelope still looked unfinished");
-    }
-    console.info(`[bridle] reply captured (${prev.length} chars): ${prev.slice(0, 120).replace(/\n/g, " ")}`);
-
-    const parsed = Wire.parseToolCalls(prev);
     return {
       ok: true,
       text: parsed.text,

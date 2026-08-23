@@ -206,17 +206,30 @@ export async function main(cliArgs = []) {
     } catch { /* tidak fatal */ }
     console.log("[bridle] menunggu Studio mendaftar ke MCP proxy … (REPL tetap bisa dipakai)");
     (async () => {
-      const deadline = Date.now() + 120_000; // Studio boleh dibuka belakangan
+      const deadline = Date.now() + 150_000; // Studio boleh dibuka belakangan
+      let unreachableStreak = 0;
+      let respawned = false;
       while (Date.now() < deadline && studioState === "checking") {
         try {
           const studios = await robloxTransport.listStudios();
+          unreachableStreak = 0;
           if (studios.length > 0) {
             studioName = studios[0].name ?? "(unnamed)";
             studioState = "ready";
             console.log(`[bridle] studio siap: ${studioName}`);
             return;
           }
-        } catch { /* proxy belum siap — coba lagi */ }
+        } catch {
+          unreachableStreak++;
+          // Proxy macet total? Restart SEKALI ala ZS, lalu lanjut memantau.
+          if (unreachableStreak >= 3 && !respawned &&
+              typeof robloxTransport.respawn === "function") {
+            respawned = true;
+            console.log("[bridle] proxy macet — restart sekali …");
+            robloxTransport = await robloxTransport.respawn();
+            unreachableStreak = 0;
+          }
+        }
         await new Promise((r) => setTimeout(r, 2000));
       }
       if (studioState === "checking") {
