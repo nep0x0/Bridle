@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r run typecheck",
     "bridle": "node bundles/headless/bin/bridle.mjs",
     "chat": "node bundles/headless/bin/bridle.mjs webchat",
-    "chat:roblox": "node bundles/headless/bin/bridle.mjs webchat --roblox"
+    "chat:roblox": "node bundles/headless/bin/bridle.mjs webchat --roblox",
+    "bench": "node packages/roblox/bench/run.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

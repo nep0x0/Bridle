@@ -163,3 +163,10 @@ mengubah implementasi (keduanya bertentangan dengan schema yang diiklankan):
 Live run: wine sistem + WINEPREFIX vinegar (`prefixes/studio`), 27 tool,
 instance "ai play test" terdaftar, get_studio_state menjawab mode Edit.
 Sisa non-gate: angka benchmark mini + validasi live rule destruktif §7.
+
+**Update lanjutan (2026-08-23):** §7 tervalidasi LIVE — `execute_luau`
+destruktif ditolak tool-side tanpa `allow_destructive`, panggilan jinak
+tetap menembus (suite opt-in 2/2). §8 benchmark mini: **6/6 PASS**
+(`pnpm bench`; grounding / code-gen / debug-fix / destructive-gate /
+playtest-honesty / docs-honesty — dinilai dari hasil tool + audit rows,
+bukan klaim model). M5 buku tertutup.
