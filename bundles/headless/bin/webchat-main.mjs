@@ -141,7 +141,8 @@ const commands = bridle.ctx.requireService("commands");
 
 const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 if (isTty) {
-  const { runTuiRepl } = await import("./tui/app.js");
+  // Compiled TUI lives in dist/tui/ (bin/ is not part of the build graph).
+  const { runTuiRepl } = await import("../dist/tui/app.js");
   await runTuiRepl({
     bridle,
     commands,
