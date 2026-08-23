@@ -1,20 +1,18 @@
 /**
- * bridle webchat entry — the live "brain in a browser tab" runner.
+ * bridle webchat entry — live "brain in a browser tab" runner.
  *
- * Wires a full harness whose reasoning engine is a real web-chat tab:
+ * Interactive surface auto-selects:
+ *   real terminal  → Ink TUI  (dist/tui/app.js)
+ *   pipes / CI     → plain readline fallback
  *
- *   gateway (ws://127.0.0.1:8642)  ◀── the bridle bridge extension
- *        ▲                                    │
- *        └── render_request/render_result ────┘   chat.deepseek.com tab
- *
- * Exported as main(cliArgs) so the unified `bridle` dispatcher can route
- * `bridle webchat …` here; bin/bridle-webchat.mjs stays as a thin alias.
- *
- * No API key needed — the model is whatever you are logged into in the tab.
+ * Exported as main(cliArgs); bin/bridle.mjs routes `webchat` here and
+ * bin/bridle-webchat.mjs stays as a thin alias.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import readline from "node:readline";
 import { createBridle } from "../dist/index.js";
+import { commandPlugin, turnProgressPlugin } from "../dist/index.js";
 import {
   WebchatGateway,
   EXTENSION_DEFAULT_PORT,
@@ -22,14 +20,11 @@ import {
 import { listApprover } from "@bridle/security";
 import { blockingConsoleApprover } from "@bridle/security/node";
 import { robloxPlugin } from "@bridle/roblox";
-import { commandPlugin, turnProgressPlugin } from "../dist/index.js";
-import readline from "node:readline";
 
 export async function main(cliArgs = []) {
   // ── CLI flags ──────────────────────────────────────────────────────────
-  // Single left-to-right pass: splice each flag the moment it is consumed so
-  // indexes never go stale (the earlier collect-then-splice version let
-  // "--allow" leak into the prompt when --roblox shifted every index).
+  // Single left-to-right pass; splice each flag when consumed so indexes
+  // never go stale.
   const argv = [...cliArgs];
   const allowedTools = [];
   let robloxFlag = false;
@@ -49,7 +44,7 @@ export async function main(cliArgs = []) {
         }
         argv.splice(i, 2);
       } else {
-        argv.splice(i, 1); // --allow with no value: drop, don't misparse
+        argv.splice(i, 1);
       }
     } else {
       i++;
@@ -57,7 +52,7 @@ export async function main(cliArgs = []) {
   }
   if (allowedTools.length) {
     for (const builtin of ["echo", "now"]) {
-      if (!allowedTools.includes(builtin)) allowedTools.push(builtin); // builtins stay usable
+      if (!allowedTools.includes(builtin)) allowedTools.push(builtin);
     }
   }
 
@@ -65,22 +60,25 @@ export async function main(cliArgs = []) {
   const promptArg = argv.join(" ").trim();
   const prompt = promptArg || DEFAULT_PROMPT;
 
-  // Security policy (M4): reads flow; writes/executes need approval —
-  // via the --allow list when given, otherwise interactively in this terminal.
-  const approver = allowedTools.length ? listApprover(allowedTools) : blockingConsoleApprover();
+  // Security policy (M4): reads flow; writes/executes ask or follow --allow.
+  const approver = allowedTools.length
+    ? listApprover(allowedTools)
+    : blockingConsoleApprover();
 
-// Quiet startup: detailed diagnostics live behind --verbose.
-const vlog = (...a) => { if (verbose) console.log(...a); };
+  // Quiet startup unless --verbose.
+  const vlog = (...a) => {
+    if (verbose) console.log(...a);
+  };
 
-  // Construct first, listen later — so the capabilities frame pushed when the
-  // adapter connects already lists every registered tool.
+  // ── harness + gateway ──────────────────────────────────────────────────
+  // Construct first, listen later — capabilities frame then advertises all.
   const gw = new WebchatGateway(
     () => bridle.tools.list(),
     { port: EXTENSION_DEFAULT_PORT },
-    (m) => console.log("[gateway]", m),
+    (m) => vlog("[gateway]", m),
   );
 
-  vlog(`[bridle] gateway on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
+  console.log(`[bridle] gateway on ws://127.0.0.1:${EXTENSION_DEFAULT_PORT}`);
   const bridle = await createBridle({
     adapter: gw.webchatAdapter(),
     maxSteps: 6,
@@ -90,28 +88,23 @@ const vlog = (...a) => { if (verbose) console.log(...a); };
     },
   });
 
-  // ── Roblox domain (--roblox) ────────────────────────────────────────────
-  // Mounted AFTER createBridle so workflow/security exist, BEFORE listening so
-  // the capabilities frame already advertises the roblox tools.
   if (robloxFlag) {
     await bridle.ctx.mount(
       robloxPlugin({
         log: (m) => vlog("[roblox]", m),
-        // live transport resolves from config automatically (BRIDLE_STUDIO_MCP
-        // or detected vinegar path); without it → deterministic FakeStudio.
+        // live transport resolves from config automatically (vinegar path on
+        // this machine); without config → deterministic FakeStudio.
       }),
     );
-    vlog("[bridle] roblox domain mounted");
+    console.log("[bridle] roblox domain mounted");
   }
 
   await gw.listen();
-    console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
+  vlog("[bridle] tools:", bridle.tools.list().map((t) => t.name).join(", "));
+  console.log("[bridle] waiting for a chat tab to attach (load the extension, then open or REFRESH chat.deepseek.com) …");
 
-  // Wait until a content adapter announces itself (`adapter_ready`), not just
-  // until the service worker's socket is up — the socket alone does NOT mean
-  // any chat tab is wired. Bail after 90s with an honest message.
-  // BRIDLE_SKIP_ADAPTER_WAIT=1 skips the gate (offline tinkering: slash
-  // commands work; turns will fail honestly until a tab attaches).
+  // ── wait for a REAL chat-tab attachment ────────────────────────────────
+  // BRIDLE_SKIP_ADAPTER_WAIT=1 skips the gate (offline tinkering).
   const skipWait = process.env.BRIDLE_SKIP_ADAPTER_WAIT === "1";
   const adapterDeadline = Date.now() + 90_000;
   while (!skipWait && !gw.hasReadyAdapter()) {
@@ -133,88 +126,91 @@ const vlog = (...a) => { if (verbose) console.log(...a); };
   }
 
   process.on("SIGINT", () => gw.close().finally(() => process.exit(130)));
-  // Register early so Ctrl+C works even while waiting for the adapter.
 
-  // ── interactive surface: Ink TUI on a real terminal, readline fallback ──
-await bridle.ctx.mount(commandPlugin());
-const commands = bridle.ctx.requireService("commands");
+  // ── shared interactive plumbing (both surfaces are plugin-first) ───────
+  const sinkRef = { current: () => {} };
+  await bridle.ctx.mount(turnProgressPlugin({
+    log: (l) => sinkRef.current("info", l),
+  }));
+  await bridle.ctx.mount(commandPlugin());
+  const commands = bridle.ctx.requireService("commands");
 
-const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-if (isTty) {
-  // Compiled TUI lives in dist/tui/ (bin/ is not part of the build graph).
-  const { runTuiRepl } = await import("../dist/tui/app.js");
-  await runTuiRepl({
-    bridle,
-    commands,
-    initialPrompt: promptArg,
-    verbose,
-    sinkRef,
-    onClose: () => {},
-  });
-  await gw.close().catch(() => {});
-  return;
-}
+  // ── surface selection ──────────────────────────────────────────────────
+  const isTty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
-// ── legacy readline fallback (pipes / CI / --no-tty environments) ───────
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.setPrompt("bridle> ");
-rl.prompt(true);
+  if (isTty) {
+    // Compiled TUI lives under dist/tui/ — bin/ is not part of the graph.
+    const { runTuiRepl } = await import("../dist/tui/app.js");
+    await runTuiRepl({
+      bridle,
+      commands,
+      initialPrompt: promptArg || undefined,
+      verbose,
+      sinkRef,
+      onClose: () => {},
+    });
+    await gw.close().catch(() => {});
+    return;
+  }
 
-let running = false;
-const queue = [];
+  // ── legacy readline fallback (pipes / CI) ──────────────────────────────
+  console.log("[bridle] REPL (readline fallback) ready — /help for commands. 'exit' to quit.");
+  const rl = readline.createInterface({ input: process.stdin, terminal: false });
+  rl.setPrompt("bridle> ");
+  rl.prompt(true);
 
-async function runTurn(text) {
-  running = true;
-  console.log("─".repeat(60));
-  try {
-    const res = await bridle.run(text);
-    if (res.rejected) {
-      console.error(`rejected: ${res.rejected}`);
-    } else {
-      console.log(`steps: ${res.steps}`);
-      console.log(`final: ${res.text || "(empty response)"}`);
-      if (verbose) {
-        for (const e of bridle.log.all()) {
-          console.log(
-            `  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${JSON.stringify(e.payload).slice(0, 110)}`,
-          );
+  let running = false;
+  const queue = [];
+
+  async function runTurn(text) {
+    running = true;
+    console.log("─".repeat(60));
+    try {
+      const res = await bridle.run(text);
+      if (res.rejected) {
+        console.error(`rejected: ${res.rejected}`);
+      } else {
+        console.log(`steps: ${res.steps}`);
+        console.log(`final: ${res.text || "(empty response)"}`);
+        if (verbose) {
+          for (const e of bridle.log.all()) {
+            console.log(
+              `  ${String(e.id).padStart(3)} ${e.type.padEnd(18)} ${JSON.stringify(e.payload).slice(0, 110)}`,
+            );
+          }
         }
       }
+    } catch (err) {
+      console.error("[bridle] turn failed honestly:", err?.message ?? err);
     }
-  } catch (err) {
-    console.error("[bridle] turn failed honestly:", err?.message ?? err);
+    running = false;
+    if (queue.length) await runTurn(queue.shift());
+    else rl.prompt(true);
   }
-  running = false;
-  if (queue.length) runTurn(queue.shift());
-  else rl.prompt(true);
-}
 
-rl.on("line", (line) => {
-  const text = line.trim();
-  if (!text) {
-    rl.prompt(true);
-    return;
-  }
-  if (/^(exit|quit|keluar)$/i.test(text)) {
-    gw.close().finally(() => process.exit(0));
-    return;
-  }
-  if (text.startsWith("/")) {
-    commands
-      .dispatch(text, { log: (...p) => console.log(...p) })
-      .finally(() => rl.prompt(true));
-    return;
-  }
-  if (running) {
-    queue.push(text);
-    console.log("[bridle] queued — turn in progress");
-    return;
-  }
-  runTurn(text);
-});
+  rl.on("line", (line) => {
+    const text = line.trim();
+    if (!text) {
+      rl.prompt(true);
+      return;
+    }
+    if (/^(exit|quit|keluar)$/i.test(text)) {
+      gw.close().finally(() => process.exit(0));
+      return;
+    }
+    if (text.startsWith("/")) {
+      void commands
+        .dispatch(text, { log: (...p) => console.log(...p) })
+        .finally(() => rl.prompt(true));
+      return;
+    }
+    if (running) {
+      queue.push(text);
+      console.log("[bridle] queued — turn in progress");
+      return;
+    }
+    void runTurn(text);
+  });
 
-console.log(
-  "\n[bridle] REPL (readline fallback) ready — /help for commands. 'exit' to quit.",
-);
-if (promptArg) runTurn(promptArg);
+  if (promptArg) await runTurn(promptArg);
 }
