@@ -19,6 +19,7 @@
  */
 
 import readline from "node:readline";
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -85,6 +86,31 @@ export async function main(cliArgs = []) {
   }
 
   // ── resolved settings (CLI > config > smart defaults) ──────────────────
+  // ── port-reclaim (pola ZS): hanya satu proxy boleh memegang port WS ────
+  // StudioMCP.exe adalah SERVER; Studio menyambung KEPADANYA. Proxy lama
+  // yang masih hidup terus memegang port sehingga proxy baru tidak pernah
+  // mendapat instans. Akhiri HANYA yang terbukti dari cmdline.
+  function reclaimStaleProxies() {
+    try {
+      const out = execSync("ps -eo pid,args --no-headers", { encoding: "utf8" });
+      const victims = out
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => /StudioMCP\.exe/i.test(l))
+        .map((l) => ({ pid: Number(l.split(/\s+/)[0]), line: l }))
+        .filter((v) => Number.isFinite(v.pid));
+      if (victims.length === 0) return;
+      console.log(`[bridle] membersihkan ${victims.length} proxy StudioMCP lama …`);
+      for (const v of victims) {
+        try {
+          process.kill(v.pid, "SIGKILL");
+          console.log(`[bridle]   killed pid ${v.pid}`);
+        } catch { /* sudah mati */ }
+      }
+    } catch { /* ps tidak tersedia — lewati */ }
+  }
+  reclaimStaleProxies();
+
   const rcfg = loadRobloxConfig(() => {}, process.env);
   const studioDetected = Boolean(rcfg.studioMcpPath);
   const mountRoblox = noRoblox

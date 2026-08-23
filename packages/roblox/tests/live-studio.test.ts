@@ -110,4 +110,34 @@ describe.skipIf(!live || !cfg.studioMcpPath)("LIVE: StudioMCP over stdio", () =>
     },
     60_000,
   );
+
+  it(
+    "end-to-end proof: creates AND verifies a real Part in the open place",
+    async () => {
+      const exec = writeTools(t).find((x) => x.name === "roblox.execute_luau")!;
+      const create = await exec.execute({
+        code: [
+          'local p = Instance.new("Part")',
+          'p.Name = "BridleYellow"',
+          'p.BrickColor = BrickColor.new("Bright yellow")',
+          'p.Position = Vector3.new(0, 10, 0)',
+          'p.Anchored = true',
+          'p.Parent = workspace',
+          'return "CREATED"',
+        ].join("\n"),
+      });
+      expect(create.ok).toBe(true);
+
+      const verify = await exec.execute({
+        code: [
+          'local p = workspace:FindFirstChild("BridleYellow")',
+          'if p == nil then return "MISSING" end',
+          'return "FOUND " .. p.Name .. " color=" .. p.BrickColor.Name',
+        ].join("\n"),
+      });
+      expect(verify.ok).toBe(true);
+      expect(verify.text).toMatch(/FOUND BridleYellow/i);
+    },
+    60_000,
+  );
 });
